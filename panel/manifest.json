@@ -16,6 +16,6 @@
     }
   ],
   "requiredPermissions": {
-    "network": { "domains": ["ws://127.0.0.1:7790"] }
+    "network": { "domains": "all" }
   }
 }
