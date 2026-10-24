@@ -11,6 +11,40 @@
     <span id="conn" class="pill pill-off">Helper offline</span>
   </header>
 
+  <section id="usage-section">
+    <div class="section-head">
+      <h3>Claude usage</h3>
+      <span id="usage-updated" class="muted small"></span>
+    </div>
+    <div id="usage-empty" class="muted small">Shows after your first message.</div>
+    <div id="usage-bars" class="hidden">
+      <div class="meter">
+        <div class="meter-label"><span>5-hour limit</span><span id="u5-text"></span></div>
+        <div class="meter-track"><div id="u5-fill" class="meter-fill"></div></div>
+        <div id="u5-reset" class="muted small"></div>
+      </div>
+      <div class="meter">
+        <div class="meter-label"><span>Weekly limit</span><span id="u7-text"></span></div>
+        <div class="meter-track"><div id="u7-fill" class="meter-fill"></div></div>
+        <div id="u7-reset" class="muted small"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="chat-section">
+    <div class="section-head">
+      <h3>Chat</h3>
+      <button id="new-chat">New chat</button>
+    </div>
+    <div id="messages"><div class="muted small">Ask Claude anything. Editing Premiere from here arrives with approvals in a later step.</div></div>
+    <div id="activity" class="muted small"></div>
+    <textarea id="prompt" placeholder="Type a prompt… (Enter to send, Shift+Enter for a new line)"></textarea>
+    <div class="row">
+      <button id="stop" class="hidden">Stop</button>
+      <button id="send">Send</button>
+    </div>
+  </section>
+
   <section>
     <div class="section-head">
       <h3>Setup</h3>
@@ -18,11 +52,6 @@
     </div>
     <ul id="checks"><li class="muted">Waiting for the helper…</li></ul>
     <p id="checked-at" class="muted small"></p>
-  </section>
-
-  <section class="placeholder">
-    <h3>Chat</h3>
-    <p class="muted small">Coming in step 2.</p>
   </section>
 
   <script src="main.js"></script>

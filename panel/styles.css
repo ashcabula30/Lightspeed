@@ -64,6 +64,62 @@ ul { list-style-type: none; margin: 0; padding: 0; }
 .pill-on { background-color: #2f5f37; color: #c9f0cf; }
 .pill-off { background-color: #5f2f2f; color: #f0c9c9; }
 
+button { margin-left: 6px; }
+.hidden { display: none; }
+.row {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+/* usage meter */
+.meter { margin-top: 8px; }
+.meter-label {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.meter-track {
+  height: 6px;
+  background-color: #3a3a3a;
+  border-radius: 3px;
+}
+.meter-fill {
+  height: 6px;
+  border-radius: 3px;
+}
+.meter-green { background-color: #5fbf6a; }
+.meter-amber { background-color: #e0b440; }
+.meter-red { background-color: #e05a5a; }
+
+/* chat */
+#messages {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 6px 0;
+}
+.bubble {
+  padding: 6px 8px;
+  border-radius: 6px;
+  margin: 4px 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.bubble-user { background-color: #2f4a6b; margin-left: 24px; }
+.bubble-assistant { background-color: #383838; margin-right: 12px; }
+.bubble-error { background-color: #5f2f2f; color: #f0c9c9; }
+.bubble-note { background-color: #4d4325; color: #f0e2b5; font-size: 11px; }
+#activity { min-height: 14px; margin-bottom: 4px; }
+#prompt {
+  width: 100%;
+  min-height: 56px;
+  font-size: 12px;
+}
+
 .muted { color: #8a8a8a; }
 .small { font-size: 11px; }
 .placeholder { opacity: 0.6; }
