@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:7790; object-src 'none'; base-uri 'none'">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h2>Editing Assistant</h2>
+    <span id="conn" class="pill pill-off">Helper offline</span>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <h3>Setup</h3>
+      <button id="refresh">Refresh</button>
+    </div>
+    <ul id="checks"><li class="muted">Waiting for the helper…</li></ul>
+    <p id="checked-at" class="muted small"></p>
+  </section>
+
+  <section class="placeholder">
+    <h3>Chat</h3>
+    <p class="muted small">Coming in step 2.</p>
+  </section>
+
+  <script src="main.js"></script>
+</body>
+</html>
