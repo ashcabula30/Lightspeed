@@ -4,9 +4,11 @@ import { WebSocketServer } from 'ws';
 import { runChecks } from './checks.js';
 import { ClaudeChat } from './claude.js';
 import { loadConfig } from './config.js';
+import { analyzeSequence } from './autocut/index.js';
+import { applyCuts } from './autocut/apply.js';
 
 export const PORT = Number(process.env.EA_PORT || 7790);
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const config = loadConfig();
 
 const wss = new WebSocketServer({ host: '127.0.0.1', port: PORT, path: '/panel' });
@@ -20,6 +22,25 @@ function broadcast(msg) {
 
 // One conversation shared by every open panel, so reopening the panel keeps the chat going.
 const chat = new ClaudeChat({ workdir: config.workdir, onEvent: broadcast });
+
+// Auto-cut: one job at a time; Apply only ever uses the most recent analysis.
+const autocut = { busy: false, analysis: null };
+
+async function runAutocut(kind, job) {
+  if (autocut.busy) throw new Error('Auto-cut is already running.');
+  autocut.busy = true;
+  broadcast({ type: 'autocut-busy', busy: true, kind });
+  try {
+    await job();
+  } catch (err) {
+    console.error(`[helper] auto-cut ${kind} failed:`, err);
+    const hint = err.recovery ? ' Premiere asked for a safety check after an earlier failed command; ask in the chat to inspect and acknowledge the recovery, then try again.' : '';
+    broadcast({ type: 'autocut-error', kind, error: `${err.message}${hint}` });
+  } finally {
+    autocut.busy = false;
+    broadcast({ type: 'autocut-busy', busy: false, kind });
+  }
+}
 
 wss.on('connection', (ws) => {
   console.log(`[helper] panel connected (${wss.clients.size} open)`);
@@ -46,6 +67,21 @@ wss.on('connection', (ws) => {
         case 'chat-new':
           chat.reset();
           return broadcast({ type: 'chat-cleared' });
+        case 'autocut-analyze':
+          return await runAutocut('analyze', async () => {
+            autocut.analysis = null;
+            const result = await analyzeSequence(null, msg.settings || {}, (label) => broadcast({ type: 'autocut-progress', label }));
+            autocut.analysis = result;
+            broadcast({ type: 'autocut-result', result: { ...result, cuts: undefined, cutCount: result.cuts.length } });
+          });
+        case 'autocut-apply':
+          return await runAutocut('apply', async () => {
+            if (!autocut.analysis) throw new Error('Run Analyze first.');
+            const analysis = autocut.analysis;
+            autocut.analysis = null; // a plan is only ever applied once
+            const result = await applyCuts(analysis, (p) => broadcast({ type: 'autocut-progress', ...p }));
+            broadcast({ type: 'autocut-applied', result });
+          });
         default:
           return send(ws, { type: 'error', id: msg.id, error: `Unknown message type: ${msg.type}` });
       }

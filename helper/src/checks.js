@@ -27,7 +27,11 @@ async function checkFfmpeg() {
   return { id: 'ffmpeg', label: 'ffmpeg', state: 'ok', detail: `Version ${v}` };
 }
 
-function findWhisper() {
+export function whisperModelPath() {
+  return path.join(isWin ? path.join(localAppData, 'whisper.cpp') : path.join(os.homedir(), '.local', 'share', 'whisper.cpp'), 'models', 'ggml-small.en.bin');
+}
+
+export function findWhisper() {
   const roots = isWin ? [path.join(localAppData, 'whisper.cpp')] : [path.join(os.homedir(), '.local', 'share', 'whisper.cpp'), '/opt/homebrew/bin', '/usr/local/bin'];
   for (const root of roots) {
     if (!exists(root)) continue;
@@ -43,7 +47,7 @@ function findWhisper() {
 
 async function checkWhisper() {
   const exe = findWhisper();
-  const model = path.join(isWin ? path.join(localAppData, 'whisper.cpp') : path.join(os.homedir(), '.local', 'share', 'whisper.cpp'), 'models', 'ggml-small.en.bin');
+  const model = whisperModelPath();
   if (!exe) return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'missing', detail: 'whisper-cli was not found.', fix: 'install-whisper' };
   if (!exists(model)) return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'warn', detail: 'whisper-cli found, but the small.en speech model is missing.', fix: 'download-model' };
   return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'ok', detail: `Ready (${path.basename(path.dirname(path.dirname(exe)))}, small.en model)`, paths: { exe, model } };

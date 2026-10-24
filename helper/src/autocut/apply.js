@@ -1,0 +1,54 @@
+// Applies a cut plan in Premiere: backup sequence first, then ripple-delete in batches of 50,
+// working from the end of the timeline backwards so earlier cut times never shift.
+import { call, PremiereError } from '../premiere.js';
+
+const BATCH = 50;
+
+async function backupSequence(seq) {
+  const dup = await call('duplicate_sequence', { sequence_id: seq.id });
+  // duplicate_sequence makes the copy active; renaming needs its project-item node id.
+  const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const backupName = `${seq.name} (before auto-cut ${stamp})`;
+  const items = await call('list_project_items');
+  const copies = (Array.isArray(items) ? items : []).filter((i) => i.type === 'sequence' && i.name === dup.name);
+  const node = copies[copies.length - 1];
+  if (node) await call('rename_project_item', { item_id: node.nodeId, new_name: backupName });
+  await call('set_active_sequence', { sequence_id: seq.id });
+  return { id: dup.id, name: node ? backupName : dup.name };
+}
+
+export async function applyCuts(analysis, onProgress = () => {}) {
+  const seq = analysis.sequence;
+  const cuts = analysis.cuts;
+  if (!cuts.length) return { applied: 0 };
+
+  // Refuse if the timeline changed since the analysis (cut times would land in the wrong places).
+  const state = await call('get_premiere_state');
+  const live = (state.sequences || []).find((s) => s.id === seq.id);
+  if (!live) throw new Error(`Sequence "${seq.name}" is no longer in the project.`);
+  if (Math.abs(live.duration - seq.duration) > 0.05) throw new Error('The sequence changed since it was analysed. Run Analyze again.');
+  await call('set_active_sequence', { sequence_id: seq.id });
+
+  onProgress({ phase: 'backup', label: 'Backing up the sequence', done: 0, total: cuts.length });
+  const backup = await backupSequence(seq);
+
+  const batches = [];
+  for (let end = cuts.length; end > 0; end -= BATCH) batches.push(cuts.slice(Math.max(0, end - BATCH), end));
+  let done = 0;
+  for (const [i, batch] of batches.entries()) {
+    const ranges = batch.map((c) => ({ start: c.start, end: c.end }));
+    const base = { sequence_id: seq.id, scope: 'sync_locked', range_content: 'delete', ranges, allow_large_ripple: true };
+    onProgress({ phase: 'cutting', label: `Batch ${i + 1} of ${batches.length}: checking`, done, total: cuts.length });
+    const preview = await call('ripple_remove_timeline_ranges', { ...base, dry_run: true });
+    if (!preview.confirmationToken) throw new PremiereError('Premiere did not return a confirmation for the cut preview.', preview);
+    onProgress({ phase: 'cutting', label: `Batch ${i + 1} of ${batches.length}: cutting`, done, total: cuts.length });
+    const result = await call('ripple_remove_timeline_ranges', { ...base, dry_run: false, confirmation_token: preview.confirmationToken });
+    if (!result.verified) throw new PremiereError(`Batch ${i + 1} could not be verified. Check the timeline; the backup is "${backup.name}".`, result);
+    done += batch.length;
+    onProgress({ phase: 'cutting', label: `Batch ${i + 1} of ${batches.length} done`, done, total: cuts.length });
+  }
+
+  const after = await call('get_premiere_state');
+  const final = (after.sequences || []).find((s) => s.id === seq.id);
+  return { applied: done, backup, durationBefore: seq.duration, durationAfter: final ? final.duration : null, expectedAfter: analysis.stats.after };
+}

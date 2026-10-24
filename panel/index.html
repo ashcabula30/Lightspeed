@@ -6,6 +6,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<div id="app">
   <header>
     <h2>Editing Assistant</h2>
     <span id="conn" class="pill pill-off">Helper offline</span>
@@ -31,6 +32,51 @@
     </div>
   </section>
 
+  <section id="autocut-section">
+    <div class="section-head">
+      <h3>Auto-cut</h3>
+      <span id="ac-seq" class="muted small">Cuts the active sequence</span>
+    </div>
+    <div class="field-grid">
+      <div class="field">
+        <label for="ac-pause">Pause between lines (s)</label>
+        <input id="ac-pause" type="number" min="0.1" max="3" step="0.1" value="0.5">
+      </div>
+      <div class="field">
+        <label for="ac-threshold">Silence threshold (dB)</label>
+        <input id="ac-threshold" type="number" min="-70" max="-20" step="1" placeholder="auto">
+      </div>
+    </div>
+    <div class="field-row">
+      <input id="ac-retakes" type="checkbox" checked>
+      <label for="ac-retakes">Remove retakes</label>
+    </div>
+    <div class="field">
+      <label for="ac-slates">Retake words (comma separated)</label>
+      <input id="ac-slates" type="text" value="take again">
+    </div>
+    <div class="field-row">
+      <input id="ac-ums" type="checkbox" checked>
+      <label for="ac-ums">Remove ums and breaths in pauses</label>
+    </div>
+    <div class="row">
+      <button id="ac-analyze">Analyze</button>
+    </div>
+    <div id="ac-progress" class="muted small"></div>
+    <div id="ac-bar-track" class="meter-track hidden"><div id="ac-bar" class="meter-fill meter-green"></div></div>
+    <div id="ac-results" class="hidden">
+      <div id="ac-summary" class="summary"></div>
+      <div id="ac-breakdown" class="muted small"></div>
+      <div id="ac-review"></div>
+      <div id="ac-retakes-list"></div>
+      <div class="row">
+        <span class="muted small grow">A backup copy of the sequence is made first.</span>
+        <button id="ac-apply">Apply cuts</button>
+      </div>
+    </div>
+    <div id="ac-done" class="hidden"></div>
+  </section>
+
   <section id="chat-section">
     <div class="section-head">
       <h3>Chat</h3>
@@ -53,6 +99,7 @@
     <ul id="checks"><li class="muted">Waiting for the helper…</li></ul>
     <p id="checked-at" class="muted small"></p>
   </section>
+</div>
 
   <script src="main.js"></script>
 </body>

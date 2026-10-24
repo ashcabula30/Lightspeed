@@ -1,0 +1,52 @@
+// Talks to Premiere through the premiere-pro-mcp server (CEP connector panel must be open in Premiere).
+// The helper is an MCP client: it starts the server once and calls its tools directly, no AI involved.
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
+const isWin = process.platform === 'win32';
+const PACKAGE = 'premiere-pro-mcp@1.24.3';
+
+let client = null;
+let connecting = null;
+
+async function connect() {
+  const transport = new StdioClientTransport(isWin
+    ? { command: 'cmd', args: ['/c', 'npx', '--yes', PACKAGE], stderr: 'ignore' }
+    : { command: 'npx', args: ['--yes', PACKAGE], stderr: 'ignore' });
+  const c = new Client({ name: 'editing-assistant-helper', version: '0.3.0' });
+  transport.onclose = () => { if (client === c) client = null; };
+  await c.connect(transport);
+  return c;
+}
+
+async function getClient() {
+  if (client) return client;
+  if (!connecting) connecting = connect().then((c) => { client = c; return c; }).finally(() => { connecting = null; });
+  return connecting;
+}
+
+export class PremiereError extends Error {
+  constructor(message, details) {
+    super(message);
+    this.details = details;
+    this.recovery = /HOST_RECOVERY_REQUIRED/.test(message);
+    this.busy = /busy or blocked/i.test(message);
+  }
+}
+
+// Calls one premiere-pro-mcp tool and returns its `data`, or throws PremiereError.
+export async function call(tool, args = {}) {
+  const c = await getClient();
+  const res = await c.callTool({ name: tool, arguments: args }, undefined, { timeout: 10 * 60 * 1000 });
+  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  if (res.isError) throw new PremiereError(text.replace(/^Error:\s*/, '').split('\n')[0] || `${tool} failed`, text);
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return text; }
+  if (parsed && parsed.ok === false) throw new PremiereError(parsed.error || `${tool} failed`, parsed);
+  return parsed && 'data' in parsed ? parsed.data : parsed;
+}
+
+export async function close() {
+  if (client) await client.close().catch(() => {});
+  client = null;
+}

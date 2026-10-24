@@ -45,6 +45,7 @@ function setConnection(isOnline) {
 }
 
 function updateControls() {
+  if (typeof acUpdateControls === 'function') acUpdateControls();
   sendBtn.disabled = !online || busy;
   newChatBtn.disabled = !online || busy;
   stopBtn.className = busy ? '' : 'hidden';
@@ -141,6 +142,7 @@ function sendPrompt() {
 }
 
 function handleMessage(msg) {
+  if (handleAutocut(msg)) return;
   switch (msg.type) {
     case 'hello':
       if (msg.busy) setBusy(true);
@@ -190,6 +192,129 @@ function handleMessage(msg) {
       break;
     default:
       break;
+  }
+}
+
+// ---------- auto-cut ----------
+const acAnalyzeBtn = $('ac-analyze');
+const acApplyBtn = $('ac-apply');
+let acBusy = false;
+
+function mmss(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function acSettings() {
+  const thr = $('ac-threshold').value.trim();
+  return {
+    pauseSeconds: Number($('ac-pause').value) || 0.5,
+    thresholdDb: thr === '' ? 'auto' : Number(thr),
+    removeRetakes: $('ac-retakes').checked,
+    removeUms: $('ac-ums').checked,
+    slatePhrases: $('ac-slates').value.split(',').map((s) => s.trim()).filter(Boolean),
+  };
+}
+
+function acUpdateControls() {
+  acAnalyzeBtn.disabled = !online || acBusy;
+  acApplyBtn.disabled = !online || acBusy;
+}
+
+function listBlock(title, items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'listblock';
+  const h = document.createElement('div');
+  h.className = 'title small';
+  h.textContent = title;
+  wrap.appendChild(h);
+  for (const text of items) {
+    const d = document.createElement('div');
+    d.className = 'detail small';
+    d.textContent = text;
+    wrap.appendChild(d);
+  }
+  return wrap;
+}
+
+function renderAnalysis(r) {
+  $('ac-results').className = '';
+  $('ac-done').className = 'hidden';
+  $('ac-seq').textContent = r.sequence.name;
+  const st = r.stats;
+  $('ac-summary').textContent = st.cuts
+    ? `${st.cuts} cuts: ${mmss(st.before)} → ${mmss(st.after)} (saves ${mmss(st.removedSeconds)})`
+    : 'Nothing to cut with these settings.';
+  $('ac-breakdown').textContent = `${st.retakes} retakes · ${st.ums} ums/breaths · ${st.pauses} pauses · threshold ${r.threshold} dB`;
+
+  const review = [];
+  for (const x of r.review.unconfidentRetakes) review.push(`${mmss(x.at)}  unsure retake: "${x.removedText}"`);
+  for (const x of r.review.longUnworded) review.push(`${mmss(x.at)}  ${x.seconds}s sound cut as an um (check it's not a word)`);
+  for (const x of r.review.repeats) review.push(`${mmss(x.at)}  possible repeat, not cut: "${x.text}"`);
+  const reviewEl = $('ac-review');
+  reviewEl.innerHTML = '';
+  if (review.length) reviewEl.appendChild(listBlock('Check after applying', review));
+
+  const rtEl = $('ac-retakes-list');
+  rtEl.innerHTML = '';
+  if (r.retakes.length) rtEl.appendChild(listBlock('Retakes to remove', r.retakes.map((x) => `${mmss(x.at)}  "${x.removedText}"`)));
+  acApplyBtn.className = st.cuts ? '' : 'hidden';
+}
+
+function setAcProgress(label, done, total) {
+  $('ac-progress').textContent = label || '';
+  const track = $('ac-bar-track');
+  if (total) {
+    track.className = 'meter-track';
+    $('ac-bar').style.width = `${Math.round((done / total) * 100)}%`;
+  } else {
+    track.className = 'meter-track hidden';
+  }
+}
+
+acAnalyzeBtn.addEventListener('click', () => {
+  $('ac-results').className = 'hidden';
+  $('ac-done').className = 'hidden';
+  setAcProgress('Starting…');
+  request('autocut-analyze', { settings: acSettings() });
+});
+acApplyBtn.addEventListener('click', () => {
+  setAcProgress('Starting…', 0, 1);
+  request('autocut-apply');
+});
+
+function handleAutocut(msg) {
+  switch (msg.type) {
+    case 'autocut-busy':
+      acBusy = msg.busy;
+      acUpdateControls();
+      if (!msg.busy && $('ac-progress').textContent === 'Starting…') setAcProgress('');
+      return true;
+    case 'autocut-progress':
+      setAcProgress(msg.label, msg.done, msg.total);
+      return true;
+    case 'autocut-result':
+      setAcProgress('');
+      renderAnalysis(msg.result);
+      return true;
+    case 'autocut-applied': {
+      const r = msg.result;
+      setAcProgress('');
+      $('ac-results').className = 'hidden';
+      const done = $('ac-done');
+      done.className = 'bubble bubble-note';
+      done.textContent = `Done: ${r.applied} cuts applied. ${r.durationAfter ? `Now ${mmss(r.durationAfter)}. ` : ''}Backup: "${r.backup.name}".`;
+      return true;
+    }
+    case 'autocut-error': {
+      setAcProgress('');
+      const done = $('ac-done');
+      done.className = 'bubble bubble-error';
+      done.textContent = msg.error;
+      return true;
+    }
+    default:
+      return false;
   }
 }
 
