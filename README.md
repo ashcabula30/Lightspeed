@@ -22,7 +22,7 @@ Premiere jobs (auto-cut, QA) need the CEP panel "MCP for Adobe Premiere Pro" ope
 - **Client**: pick a client to read its guide from `knowledge-base/clients/` (fonts, text rules, must-dos). QA lists its must-dos.
 - **Auto-cut**: Analyze, then optionally **Preview as markers** (red retake, yellow um, white pause; delete a marker in Premiere to keep that part), then Apply. A backup sequence is made first. **Stop** finishes the current step and stops; **Undo cuts** swaps the backup back in under the original name (the cut version is kept, renamed). Click any time in the lists to move the playhead; times follow the cuts once applied.
 - **Review**: QA checks (gaps on V1/A1, offline media, leftover cut markers) plus the client's must-dos as a checklist, and a handoff note to copy into ClickUp or Slack. Nothing is posted from the panel.
-- **Chat**: Claude Code with read-only Premiere access. Warns before sending past 85% of the 5-hour limit.
+- **Chat** (its own panel, Editing Assistant Chat; float it like any Premiere panel): saved chats you can switch, rename and delete, replies rendered as Markdown, and approval cards when Claude needs a tool it isn't allowed yet (allow once, or Premiere tools for the whole chat). A Claude NN% chip shows plan usage; Check fetches fresh numbers. Warns before sending past 85% of the 5-hour limit. The main panel's Chat row shows usage and opens the window.
 - **Setup**: dependency checklist; **Start helper** when the helper isn't running.
 
 ## Build steps
@@ -30,5 +30,5 @@ Premiere jobs (auto-cut, QA) need the CEP panel "MCP for Adobe Premiere Pro" ope
 1. Foundation: helper, panel, setup checklist (done)
 2. Chat through Claude Code (headless), streaming replies, usage meter (done)
 3. Auto-cut: silences and retakes, preview then apply (done)
-4. Panel redesign, client guides, marker preview, jump to time, Stop and Undo cuts, QA and handoff (captions dropped: Premiere does them), helper auto-start, usage warning (built 2026-10-25, testing in Premiere next)
+4. Native Premiere styling, chat window with saved chats and approvals, panel redesign, client guides, marker preview, jump to time, Stop and Undo cuts, QA and handoff (captions dropped: Premiere does them), helper auto-start, usage warning (built 2026-10-25, testing in Premiere next)
 5. Approving Claude's edits from chat, the installer, Mac support
