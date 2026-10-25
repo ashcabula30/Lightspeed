@@ -5,6 +5,7 @@ import { spawn, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const isWin = process.platform === 'win32';
 // Last known plan usage, kept between helper restarts so the meter has numbers before any chat.
@@ -49,18 +50,25 @@ export function findClaudeExecutable() {
   });
 }
 
-// Tools Claude may use without asking while approvals don't exist yet (read-only).
-// Premiere tools are allowed by prefix: these only look at the project, never change it.
-const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
-  ...['get_*', 'list_*', 'verify_*', 'inspect_*', 'find_*', 'search_*', 'read_*', 'check_*', 'is_*', 'has_*', 'ping']
-    .map((p) => `mcp__premiere-pro__${p}`)];
+// The panel's own tool server (tools-mcp.js): Tesseract and media tools locked to job folders on C:.
+const TOOLS_SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'tools-mcp.js');
+const MCP_CONFIG = JSON.stringify({ mcpServers: { 'editing-assistant': { command: process.execPath, args: [TOOLS_SERVER] } } });
+// Tools Claude may use without asking: reading, and the whole editing-assistant server. Its local
+// tools are locked down, and its Premiere tools ask the editor through a live card for any change
+// (the helper does that, mid-reply). Anything else (Bash, PowerShell, Write) needs an approval card.
+const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'mcp__editing-assistant'];
 
 // Standing notes for chats started from the panel: facts about this setup Claude can't see.
 const WORK_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'EditingAssistant', 'tesseract');
 const PANEL_NOTES = [
-  'You are running inside the Editing Assistant panel in Premiere Pro. The editor approves tools from approval cards in the chat.',
-  `Tesseract (tsrct) projects must be created and saved on an NTFS drive. Use ${WORK_DIR} (or a folder on C: or D:) for .tsrct files and renders.`,
-  'Never put .tsrct projects on the E: drive: it is exFAT, and Tesseract fails there with "Access is denied" on every save after the first.',
+  'You are running inside the Editing Assistant panel in Premiere Pro. The editor approves other tools from approval cards in the chat.',
+  'All your tools come from the editing-assistant server. Premiere Pro tools are there under their usual names; ones that change the project',
+  'show the editor an approval card and wait for the answer inside the same tool call, so just call them and continue with the result',
+  '(if the editor says no, nothing changed: ask what they want instead). Do not try to acknowledge Premiere safety checks yourself unless asked.',
+  'For media work use the local tools, which run without approval: tesseract (runs tsrct in a job folder), ffmpeg (trim, retime, strip audio, convert),',
+  'write_job_file (e.g. edited document JSON for "project commit --file"), list_job, media_info (ffprobe), grab_frame (a PNG you can Read),',
+  'and copy_out (puts a finished file next to the footage without overwriting). Use them instead of Bash or PowerShell, and reuse one job name per piece of work.',
+  `Job folders live in ${WORK_DIR} on C:. Never put .tsrct projects on the E: drive: it is exFAT, and Tesseract fails there with "Access is denied" on every save after the first.`,
 ].join(' ');
 
 export class ClaudeChat {
@@ -137,10 +145,13 @@ export class ClaudeChat {
     if (!exe) throw new Error('Claude Code was not found. Install it and sign in, then refresh the setup checklist.');
 
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-      '--append-system-prompt', PANEL_NOTES, '--allowedTools', ...READ_ONLY_TOOLS, ...extraTools];
+      '--append-system-prompt', PANEL_NOTES, '--mcp-config', MCP_CONFIG, '--strict-mcp-config',
+      '--allowedTools', ...READ_ONLY_TOOLS, ...extraTools];
     if (this.sessionId) args.push('--resume', this.sessionId);
 
-    const proc = spawn(exe, args, { cwd: this.workdir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    // A Premiere edit can wait on the editor's approval card, so give tool calls up to 30 minutes.
+    const env = { ...process.env, MCP_TOOL_TIMEOUT: String(30 * 60 * 1000) };
+    const proc = spawn(exe, args, { cwd: this.workdir, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc = proc;
     // The prompt goes in on stdin, never as a command-line argument.
     proc.stdin.end(text);

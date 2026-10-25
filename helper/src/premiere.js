@@ -46,6 +46,28 @@ export async function call(tool, args = {}) {
   return parsed && 'data' in parsed ? parsed.data : parsed;
 }
 
+// For the chat's tool server: the connector's full tool list, and calls passed through unchanged,
+// so the chat shares this one long-lived connection instead of opening (and dropping) its own.
+let toolList = null;
+export async function listTools() {
+  if (toolList) return toolList;
+  const c = await getClient();
+  const tools = [];
+  let cursor;
+  do {
+    const page = await c.listTools(cursor ? { cursor } : {});
+    tools.push(...page.tools);
+    cursor = page.nextCursor;
+  } while (cursor);
+  toolList = tools;
+  return tools;
+}
+
+export async function callRaw(tool, args = {}) {
+  const c = await getClient();
+  return c.callTool({ name: tool, arguments: args }, undefined, { timeout: 10 * 60 * 1000 });
+}
+
 export async function close() {
   if (client) await client.close().catch(() => {});
   client = null;

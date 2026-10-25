@@ -53,6 +53,12 @@ async function checkWhisper() {
   return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'ok', detail: `Ready (${path.basename(path.dirname(path.dirname(exe)))}, small.en model)`, paths: { exe, model } };
 }
 
+// The tsrct executable to run: the pinned version when installed, otherwise any found.
+export function tesseractExe() {
+  const found = findTesseract();
+  return found.find((p) => p.includes(REQUIRED_TESSERACT)) || found[0] || null;
+}
+
 function findTesseract() {
   const candidates = [];
   if (isWin) {

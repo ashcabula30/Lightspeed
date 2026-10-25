@@ -403,7 +403,7 @@ function setReplyText(body, text) {
 // ---------- approvals ----------
 // Claude asked for a tool it isn't allowed yet: show what it wanted and let the editor decide.
 const approvalCards = {}; // approval id -> its card on screen
-const RESOLVED_TEXT = { once: 'Allowed for that reply.', always: 'Allowed for the rest of this chat.', deny: 'Not allowed.' };
+const RESOLVED_TEXT = { once: 'Allowed.', always: 'Allowed for the rest of this chat.', deny: 'Not allowed.' };
 
 function resolveApprovalCard(card, mode) {
   const actions = card.querySelector('.approval-actions');
@@ -442,13 +442,14 @@ function addApproval(m) {
       b.className = `btn btn-small ${cls}`;
       b.textContent = label;
       onClick(b, () => {
-        if (mode !== 'deny' && busy) return;
+        // A live card is answered while Claude waits for it; an after-reply card starts a new reply.
+        if (!a.live && mode !== 'deny' && busy) return;
         request('chat-approve', { chatId: currentChatId, approvalId: a.id, mode });
       });
       actions.appendChild(b);
     };
-    button('Allow and continue', 'btn-primary', 'once');
-    if (a.canAlways) button('Always allow in this chat', 'btn-secondary', 'always');
+    button(a.live ? 'Allow' : 'Allow and continue', 'btn-primary', 'once');
+    if (a.canAlways) button(a.live ? 'Allow all Premiere edits in this chat' : 'Always allow in this chat', 'btn-secondary', 'always');
     button("Don't allow", 'btn-ghost', 'deny');
     card.appendChild(actions);
   }

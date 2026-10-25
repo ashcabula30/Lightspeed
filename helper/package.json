@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
-    "ws": "8.18.0"
+    "ws": "8.18.0",
+    "zod": "4.6.7"
   }
 }
