@@ -55,6 +55,14 @@ const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
   ...['get_*', 'list_*', 'verify_*', 'inspect_*', 'find_*', 'search_*', 'read_*', 'check_*', 'is_*', 'has_*', 'ping']
     .map((p) => `mcp__premiere-pro__${p}`)];
 
+// Standing notes for chats started from the panel: facts about this setup Claude can't see.
+const WORK_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'EditingAssistant', 'tesseract');
+const PANEL_NOTES = [
+  'You are running inside the Editing Assistant panel in Premiere Pro. The editor approves tools from approval cards in the chat.',
+  `Tesseract (tsrct) projects must be created and saved on an NTFS drive. Use ${WORK_DIR} (or a folder on C: or D:) for .tsrct files and renders.`,
+  'Never put .tsrct projects on the E: drive: it is exFAT, and Tesseract fails there with "Access is denied" on every save after the first.',
+].join(' ');
+
 export class ClaudeChat {
   constructor({ workdir, onEvent }) {
     this.workdir = workdir;
@@ -122,13 +130,14 @@ export class ClaudeChat {
     }
   }
 
-  async send(text) {
+  // extraTools: tools the editor approved for this reply, on top of the read-only set.
+  async send(text, extraTools = []) {
     if (this.proc) throw new Error('Claude is still answering the previous message.');
     const exe = await findClaudeExecutable();
     if (!exe) throw new Error('Claude Code was not found. Install it and sign in, then refresh the setup checklist.');
 
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-      '--allowedTools', ...READ_ONLY_TOOLS];
+      '--append-system-prompt', PANEL_NOTES, '--allowedTools', ...READ_ONLY_TOOLS, ...extraTools];
     if (this.sessionId) args.push('--resume', this.sessionId);
 
     const proc = spawn(exe, args, { cwd: this.workdir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -160,7 +169,8 @@ export class ClaudeChat {
       if (result) {
         if (result.session_id) this.sessionId = result.session_id;
         this.onEvent({ type: 'chat-done', isError: !!result.is_error, error: result.is_error ? result.result : null,
-          durationMs: result.duration_ms, denied: (result.permission_denials || []).map((d) => d.tool_name) });
+          durationMs: result.duration_ms, denied: (result.permission_denials || []).map((d) => d.tool_name),
+          deniedDetails: (result.permission_denials || []).map((d) => ({ tool: d.tool_name, input: summarizeInput(d.tool_input) || briefJson(d.tool_input) })) });
       } else {
         this.onEvent({ type: 'chat-error', error: code === null ? 'Stopped.' : (stderr.trim().split('\n').pop() || `Claude Code exited with code ${code}.`) });
       }
@@ -196,6 +206,10 @@ export class ClaudeChat {
         break;
     }
   }
+}
+
+function briefJson(input) {
+  try { return JSON.stringify(input || {}).slice(0, 160); } catch { return ''; }
 }
 
 function summarizeInput(input) {

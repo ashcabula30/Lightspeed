@@ -2,7 +2,7 @@
 // Listens on 127.0.0.1 only, so nothing outside this computer can reach it.
 import { WebSocketServer } from 'ws';
 import { runChecks } from './checks.js';
-import { ClaudeChat } from './claude.js';
+import { Chats } from './chats.js';
 import { loadConfig } from './config.js';
 import { acknowledgeRecovery, call, close as closePremiere, inspectRecovery } from './premiere.js';
 import { analyzeSequence } from './autocut/index.js';
@@ -25,8 +25,8 @@ function broadcast(msg) {
   for (const ws of wss.clients) send(ws, msg);
 }
 
-// One conversation shared by every open panel, so reopening the panel keeps the chat going.
-const chat = new ClaudeChat({ workdir: config.workdir, onEvent: broadcast });
+// Saved chats shared by every open panel; each keeps its own Claude Code conversation.
+const chat = new Chats({ workdir: config.workdir, onEvent: broadcast });
 
 // What this session has done, for Apply, Restore and the handoff draft.
 const session = { analysis: null, applied: null, backup: null, qa: null };
@@ -63,8 +63,9 @@ const progress = (prefix) => (p) => broadcast({ type: `${prefix}-progress`, ...(
 
 wss.on('connection', (ws) => {
   console.log(`[helper] panel connected (${wss.clients.size} open)`);
-  send(ws, { type: 'hello', helperVersion: VERSION, workdir: config.workdir, busy: chat.busy, jobBusy });
+  send(ws, { type: 'hello', helperVersion: VERSION, workdir: config.workdir, busyChatId: chat.busyChatId, jobBusy });
   if (chat.lastUsage) send(ws, { type: 'usage', usage: chat.lastUsage });
+  send(ws, { type: 'chats', chats: chat.summary(), busyChatId: chat.busyChatId });
 
   ws.on('message', async (raw) => {
     let msg;
@@ -77,14 +78,29 @@ wss.on('connection', (ws) => {
           return send(ws, { type: 'status', id: msg.id, ...(await runChecks()) });
 
         // ---------- chat ----------
+        case 'chats-list':
+          return send(ws, { type: 'chats', chats: chat.summary(), busyChatId: chat.busyChatId });
+        case 'chat-open': {
+          const c = chat.get(String(msg.chatId));
+          return send(ws, { type: 'chat-opened', chat: { id: c.id, title: c.title, messages: c.messages }, busy: chat.busyChatId === c.id });
+        }
+        case 'chat-create': {
+          const c = chat.create();
+          return send(ws, { type: 'chat-opened', chat: { id: c.id, title: c.title, messages: [] }, busy: false });
+        }
+        case 'chat-rename':
+          return chat.rename(String(msg.chatId), msg.title);
+        case 'chat-delete':
+          return chat.delete(String(msg.chatId));
         case 'chat-send': {
           const text = String(msg.text || '').trim();
           if (!text) return;
-          broadcast({ type: 'chat-user', text });
-          return await chat.send(text);
+          return await chat.send(String(msg.chatId), text);
         }
         case 'chat-stop':
           return chat.stop();
+        case 'chat-approve':
+          return await chat.approve(String(msg.chatId), String(msg.approvalId), ['once', 'always', 'deny'].includes(msg.mode) ? msg.mode : 'deny');
         case 'usage-check':
           try {
             await chat.checkUsage();
@@ -92,9 +108,6 @@ wss.on('connection', (ws) => {
             send(ws, { type: 'usage-error', error: String(err.message || err) });
           }
           return;
-        case 'chat-new':
-          chat.reset();
-          return broadcast({ type: 'chat-cleared' });
 
         // ---------- auto-cut ----------
         case 'autocut-analyze':
@@ -182,7 +195,7 @@ wss.on('connection', (ws) => {
       }
     } catch (err) {
       console.error('[helper] request failed:', err);
-      send(ws, { type: msg.type && msg.type.startsWith('chat') ? 'chat-error' : 'error', id: msg.id, request: msg.type, error: String(err && err.message || err) });
+      send(ws, { type: msg.type && msg.type.startsWith('chat') ? 'chat-error' : 'error', id: msg.id, request: msg.type, chatId: msg.chatId, error: String(err && err.message || err) });
     }
   });
 

@@ -25,6 +25,29 @@ function showFatal(text) {
 }
 window.addEventListener('error', (e) => showFatal(e.message || String(e.error)));
 
+// Two panels share this one script: the main panel shows #app and the chat window
+// (Editing Assistant Chat) shows #chat-app, so both use one helper connection and one state.
+function attachTo(id) {
+  return (arg) => {
+    const node = arg && arg.node ? arg.node : arg;
+    const el = $(id);
+    if (node && node.appendChild && el && el.parentNode !== node) node.appendChild(el);
+  };
+}
+if (IN_UXP) {
+  try {
+    require('uxp').entrypoints.setup({
+      panels: {
+        editingAssistantPanel: { create: attachTo('app'), show: attachTo('app') },
+        editingAssistantChat: { create: attachTo('chat-app'), show: attachTo('chat-app') },
+      },
+    });
+  } catch (e) { showFatal(e.message); }
+} else {
+  // Browser preview: index.html#chat shows the chat window, anything else the main panel.
+  $(location.hash === '#chat' ? 'app' : 'chat-app').style.display = 'none';
+}
+
 // ---------- small UI helpers ----------
 function hasClass(el, name) {
   return (' ' + (el.className || '') + ' ').indexOf(' ' + name + ' ') >= 0;
@@ -58,6 +81,7 @@ function setSwitch(row, on) {
   setClass(row, 'on', on);
   setClass(row.querySelector('.switch'), 'switch-on', on);
   setClass(row.querySelector('.knob'), 'knob-on', on);
+  row.querySelector('.knob').textContent = on ? '✓' : ''; // drawn as a Spectrum checkbox
 }
 // Spectrum fields in Premiere can report null until edited, so reads fall back to the
 // starting value and writes set both the property and the attribute.
@@ -125,7 +149,10 @@ const newChatBtn = $('new-chat');
 let ws = null;
 let nextId = 1;
 let online = false;
-let busy = false;           // chat is answering
+let busy = false;           // some chat is answering
+let busyChatId = null;      // which one
+let currentChatId = recall('ea-chat', null); // the chat shown in the chat window
+let chatsList = [];         // [{ id, title, updatedAt, count }] newest first
 let jobBusy = false;        // a Premiere job (auto-cut, QA) is running in the helper
 let currentReply = null;    // the assistant message being streamed into
 const messageHooks = [];    // features.js handlers: return true when a message was theirs
@@ -148,7 +175,7 @@ function setPanelOpen(panel, open) {
   setClass(panel, 'open', open);
   const head = panel.querySelector('.panel-head');
   setClass(head, 'panel-head-open', open);
-  head.querySelector('.chevron').textContent = open ? '▾' : '▸';
+  setClass(head.querySelector('.tri'), 'tri-open', open);
   panel.querySelector('.panel-body').style.display = open ? 'block' : 'none';
 }
 function initPanels() {
@@ -189,18 +216,24 @@ function updateControls() {
   acUpdateControls();
   setDisabled(refreshBtn, !online);
   if ($('usage-check').textContent !== 'Checking…') setDisabled($('usage-check'), !online);
-  setDisabled(sendBtn, !online || busy);
-  setDisabled(newChatBtn, !online || busy);
-  show(stopBtn, busy);
+  setDisabled(sendBtn, !online || busy || !currentChatId);
+  setDisabled(newChatBtn, !online);
+  show(stopBtn, busy && busyChatId === currentChatId);
   for (const h of controlHooks) h();
 }
 
-function setBusy(value) {
-  busy = value;
-  if (!value) activityEl.textContent = '';
-  if (value) setMeta('chat-meta', 'Replying…', 'busy');
+// Only one chat answers at a time; busyChatId says which (null when Claude is idle).
+function setBusyChat(id) {
+  busyChatId = id || null;
+  busy = !!busyChatId;
+  if (!busy || busyChatId !== currentChatId) activityEl.textContent = '';
+  if (busy) setMeta('chat-meta', 'Replying…', 'busy');
   else setMeta('chat-meta', ...chatIdleMeta());
+  renderChatList();
   updateControls();
+}
+function setBusy(value) {
+  setBusyChat(value ? busyChatId || currentChatId : null);
 }
 
 // Opens helper/start-helper.cmd (next to the panel folder) in a console window. Premiere can
@@ -315,19 +348,105 @@ function renderUsage(usage) {
   const reset = five && (usedNow(five) === 0 && five.used > 0 ? 'has reset' : `resets ${formatReset(five.resetsAt)}`);
   const checked = new Date(usage.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   $('usage-reset').textContent = `${reset ? `5-hour ${reset}. ` : ''}Checked ${checked}.`;
+  const pct = (w) => (usedNow(w) === null ? 'n/a' : `${Math.round(usedNow(w) * 100)}%`);
+  $('usage-summary').textContent = `Claude usage: 5-hour ${pct(usage.fiveHour)}, weekly ${pct(usage.sevenDay)} (checked ${checked}).`;
   if (!busy) setMeta('chat-meta', ...chatIdleMeta());
+  const fivePct = usedNow(five) === null ? null : Math.round(usedNow(five) * 100);
+  const chip = $('quota-chip');
+  chip.textContent = fivePct === null ? 'Claude —' : `Claude ${fivePct}%`;
+  chip.className = `quota${fivePct >= 90 ? ' quota-bad' : fivePct >= 70 ? ' quota-warn' : ''}`;
 }
 
 // ---------- chat ----------
+// Claude's messages render as Markdown under a small "Claude" label (shown once per run of
+// replies); returns the element text goes into, so streamed replies can keep appending.
 function addMessage(kind, text) {
   const empty = messagesEl.querySelector('.empty');
   if (empty) messagesEl.removeChild(empty);
   const div = document.createElement('div');
   div.className = `msg msg-${kind}`;
-  div.textContent = text;
+  if (kind !== 'assistant') {
+    div.textContent = text;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+  const prev = messagesEl.lastChild;
+  if (!prev || !hasClass(prev, 'msg-assistant')) {
+    const role = document.createElement('div');
+    role.className = 'msg-role';
+    role.textContent = 'Claude';
+    div.appendChild(role);
+  }
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  div.appendChild(body);
   messagesEl.appendChild(div);
+  setReplyText(body, text);
+  return body;
+}
+
+function setReplyText(body, text) {
+  body.mdRaw = text;
+  body.innerHTML = '';
+  body.appendChild(renderMarkdown(text));
   messagesEl.scrollTop = messagesEl.scrollHeight;
-  return div;
+}
+
+// ---------- approvals ----------
+// Claude asked for a tool it isn't allowed yet: show what it wanted and let the editor decide.
+const approvalCards = {}; // approval id -> its card on screen
+const RESOLVED_TEXT = { once: 'Allowed for that reply.', always: 'Allowed for the rest of this chat.', deny: 'Not allowed.' };
+
+function resolveApprovalCard(card, mode) {
+  const actions = card.querySelector('.approval-actions');
+  if (actions) card.removeChild(actions);
+  const done = document.createElement('div');
+  done.className = `approval-done${mode === 'deny' ? ' approval-denied' : ''}`;
+  done.textContent = RESOLVED_TEXT[mode] || '';
+  card.appendChild(done);
+}
+
+function addApproval(m) {
+  const empty = messagesEl.querySelector('.empty');
+  if (empty) messagesEl.removeChild(empty);
+  const a = m.approval;
+  const card = document.createElement('div');
+  card.className = 'msg approval';
+  approvalCards[a.id] = card;
+  const title = document.createElement('div');
+  title.className = 'approval-title';
+  title.textContent = m.text;
+  card.appendChild(title);
+  for (const d of a.details || []) {
+    if (!d.input) continue;
+    const line = document.createElement('div');
+    line.className = 'approval-detail';
+    line.textContent = d.input;
+    card.appendChild(line);
+  }
+  if (a.resolved) {
+    resolveApprovalCard(card, a.resolved);
+  } else {
+    const actions = document.createElement('div');
+    actions.className = 'approval-actions';
+    const button = (label, cls, mode) => {
+      const b = document.createElement('div');
+      b.className = `btn btn-small ${cls}`;
+      b.textContent = label;
+      onClick(b, () => {
+        if (mode !== 'deny' && busy) return;
+        request('chat-approve', { chatId: currentChatId, approvalId: a.id, mode });
+      });
+      actions.appendChild(b);
+    };
+    button('Allow and continue', 'btn-primary', 'once');
+    if (a.canAlways) button('Always allow in this chat', 'btn-secondary', 'always');
+    button("Don't allow", 'btn-ghost', 'deny');
+    card.appendChild(actions);
+  }
+  messagesEl.appendChild(card);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 // Check asks the helper for fresh numbers (one tiny request on Claude's cheapest model).
@@ -348,11 +467,112 @@ function sendPrompt() {
     addMessage('note', `You've used ${Math.round(usedNow(five) * 100)}% of your 5-hour limit (resets ${formatReset(five.resetsAt)}). Long tasks may hit the limit. Press Send again to go ahead.`);
     return;
   }
-  if (request('chat-send', { text })) {
+  if (!currentChatId) return;
+  if (request('chat-send', { chatId: currentChatId, text })) {
     setValue('prompt', '');
-    setBusy(true);
+    setBusyChat(currentChatId);
     activityEl.textContent = 'Thinking…';
   }
+}
+
+// ---------- chat list ----------
+const EMPTY_CHAT = 'Ask about your project, the timeline, or anything else. Claude can read Premiere; edits come later.';
+
+function whenText(t) {
+  const d = new Date(t);
+  const today = new Date().toDateString() === d.toDateString();
+  return today ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function renderChatList() {
+  const box = $('chat-list-items');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const c of chatsList) {
+    const row = document.createElement('div');
+    row.className = `chat-row${c.id === currentChatId ? ' chat-row-current' : ''}`;
+    const title = document.createElement('div');
+    title.className = 'chat-row-title';
+    title.textContent = c.title;
+    const meta = document.createElement('div');
+    meta.className = 'chat-row-meta';
+    meta.textContent = c.id === busyChatId ? 'Replying…' : whenText(c.updatedAt);
+    if (c.id === busyChatId) setClass(meta, 'meta-busy', true);
+    row.appendChild(title);
+    row.appendChild(meta);
+    row.addEventListener('click', () => {
+      showChatList(false);
+      if (c.id !== currentChatId) request('chat-open', { chatId: c.id });
+    });
+    box.appendChild(row);
+  }
+  if (!chatsList.length) {
+    const none = document.createElement('div');
+    none.className = 'hint';
+    none.textContent = 'No chats yet.';
+    box.appendChild(none);
+  }
+}
+
+function showChatList(open) {
+  show($('chat-list'), open);
+  show($('usage-pop'), false);
+  if (open) {
+    const cur = chatsList.find((c) => c.id === currentChatId);
+    setValue('chat-rename', cur ? cur.title : '');
+    renderChatList();
+  }
+}
+
+let loadedChatId = null; // the chat whose messages are on screen
+
+function openChat(chat, isBusy) {
+  currentChatId = chat.id;
+  loadedChatId = chat.id;
+  store('ea-chat', chat.id);
+  $('chat-title').textContent = chat.title;
+  currentReply = null;
+  messagesEl.innerHTML = '';
+  if (!chat.messages.length) messagesEl.innerHTML = `<div class="empty">${EMPTY_CHAT}</div>`;
+  for (const m of chat.messages) {
+    if (m.kind === 'approval') addApproval(m);
+    else addMessage(m.kind, m.text);
+  }
+  // Text arriving for a reply that's already streaming continues its last message.
+  if (isBusy && chat.messages.length && chat.messages[chat.messages.length - 1].kind === 'assistant') {
+    currentReply = messagesEl.lastChild && messagesEl.lastChild.querySelector('.msg-body');
+  }
+  activityEl.textContent = isBusy ? 'Replying…' : '';
+  renderChatList();
+  updateControls();
+}
+
+// After the list changes: keep the current chat, or fall back to the newest (or a new one).
+function syncCurrentChat() {
+  if (currentChatId && chatsList.some((c) => c.id === currentChatId)) {
+    const cur = chatsList.find((c) => c.id === currentChatId);
+    $('chat-title').textContent = cur.title;
+    if (loadedChatId !== currentChatId) request('chat-open', { chatId: currentChatId });
+    return;
+  }
+  if (chatsList.length) request('chat-open', { chatId: chatsList[0].id });
+  else request('chat-create');
+}
+
+let deleteArmed = null; // Delete chat asks for a second click within 3 seconds
+function deleteCurrentChat() {
+  const btn = $('chat-delete');
+  if (deleteArmed !== currentChatId) {
+    deleteArmed = currentChatId;
+    btn.textContent = 'Click again to delete';
+    setTimeout(() => { deleteArmed = null; btn.textContent = 'Delete chat'; }, 3000);
+    return;
+  }
+  deleteArmed = null;
+  btn.textContent = 'Delete chat';
+  request('chat-delete', { chatId: currentChatId });
+  currentChatId = null;
+  showChatList(false);
 }
 
 // ---------- Premiere safety check ----------
@@ -378,6 +598,64 @@ function handleRecovery(msg) {
   return true;
 }
 
+function handleChatEvent(msg) {
+  switch (msg.type) {
+    case 'chat-user':
+      addMessage('user', msg.text);
+      currentReply = null;
+      setBusyChat(msg.chatId || currentChatId);
+      break;
+    case 'chat-block':
+      // A new text block starts after tool use; keep one message per block.
+      if (currentReply && currentReply.mdRaw) currentReply = null;
+      break;
+    case 'chat-delta':
+      if (!currentReply) currentReply = addMessage('assistant', '');
+      setReplyText(currentReply, (currentReply.mdRaw || '') + msg.text);
+      activityEl.textContent = 'Replying…';
+      break;
+    case 'chat-tool':
+      activityEl.textContent = `Using ${msg.name}${msg.input ? ': ' + msg.input : ''}`;
+      currentReply = null;
+      break;
+    case 'chat-done':
+      // Blocked tools arrive separately as an approval card (chat-approval).
+      if (msg.isError) addMessage('error', msg.error || 'Claude reported an error.');
+      currentReply = null;
+      setBusyChat(null);
+      break;
+    case 'chat-approval':
+      addApproval(msg.message);
+      break;
+    case 'chat-approval-resolved': {
+      const card = approvalCards[msg.approvalId];
+      if (card) resolveApprovalCard(card, msg.mode);
+      break;
+    }
+    case 'chat-error':
+      addMessage('error', msg.error);
+      currentReply = null;
+      setBusyChat(null);
+      break;
+    default:
+      break;
+  }
+}
+
+// Shows the chat window: Premiere's panel API where it has one, a second window in the preview.
+function openChatWindow() {
+  if (!IN_UXP) {
+    window.open('index.html#chat', 'ea-chat', 'width=440,height=680');
+    return;
+  }
+  try {
+    const panel = require('uxp').entrypoints.getPanel('editingAssistantChat');
+    panel.show();
+  } catch (e) {
+    setMeta('chat-meta', 'Window › UXP Plugins › Editing Assistant Chat', 'warn');
+  }
+}
+
 function handleMessage(msg) {
   if (handleRecovery(msg)) return;
   if (msg.recovery && /-error$/.test(msg.type)) showRecovery('Premiere wants a safety check before more edits.', false);
@@ -385,9 +663,16 @@ function handleMessage(msg) {
   if (handleAutocut(msg)) return;
   switch (msg.type) {
     case 'hello':
-      if (msg.busy) setBusy(true);
       jobBusy = !!msg.jobBusy;
-      updateControls();
+      setBusyChat(msg.busyChatId);
+      break;
+    case 'chats':
+      chatsList = msg.chats || [];
+      setBusyChat(msg.busyChatId);
+      syncCurrentChat();
+      break;
+    case 'chat-opened':
+      openChat(msg.chat, msg.busy);
       break;
     case 'job-busy':
       jobBusy = msg.busy;
@@ -404,39 +689,20 @@ function handleMessage(msg) {
       setUsageChecking(false);
       $('usage-reset').textContent = `Couldn't check usage: ${msg.error}`;
       break;
+    // Chat events carry their chat; only the chat on screen draws them (the helper stores all).
     case 'chat-user':
-      addMessage('user', msg.text);
-      currentReply = null;
-      setBusy(true);
-      break;
     case 'chat-block':
-      // A new text block starts after tool use; keep one message per block.
-      if (currentReply && currentReply.textContent) currentReply = null;
-      break;
     case 'chat-delta':
-      if (!currentReply) currentReply = addMessage('assistant', '');
-      currentReply.textContent += msg.text;
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-      activityEl.textContent = 'Replying…';
-      break;
     case 'chat-tool':
-      activityEl.textContent = `Using ${msg.name}${msg.input ? ': ' + msg.input : ''}`;
-      currentReply = null;
-      break;
     case 'chat-done':
-      if (msg.isError) addMessage('error', msg.error || 'Claude reported an error.');
-      if (msg.denied && msg.denied.length) addMessage('note', `Blocked (needs approval, coming later): ${msg.denied.filter((d, i, a) => a.indexOf(d) === i).join(', ')}`);
-      currentReply = null;
-      setBusy(false);
-      break;
     case 'chat-error':
-      addMessage('error', msg.error);
-      currentReply = null;
-      setBusy(false);
-      break;
-    case 'chat-cleared':
-      messagesEl.innerHTML = '<div class="empty">New conversation.</div>';
-      currentReply = null;
+    case 'chat-approval':
+    case 'chat-approval-resolved':
+      if (msg.chatId && msg.chatId !== currentChatId) {
+        if (msg.type === 'chat-done' || msg.type === 'chat-error') setBusyChat(null);
+        break;
+      }
+      handleChatEvent(msg);
       break;
     case 'error':
       console.error('Helper error:', msg.error);
@@ -682,6 +948,7 @@ function connect() {
     try { handleMessage(msg); } catch (e) { showFatal(e.message); }
   };
   ws.onclose = () => {
+    loadedChatId = null; // reload the chat's messages on reconnect
     setConnection(false);
     setTimeout(connect, RECONNECT_MS);
   };
@@ -704,7 +971,7 @@ function wire() {
     const more = $('ac-more');
     const opening = hasClass(more, 'hidden');
     show(more, opening);
-    $('ac-more-toggle').firstElementChild.textContent = opening ? '▾' : '▸';
+    setClass($('ac-more-tri'), 'tri-open', opening);
   });
 
   onClick(acAnalyzeBtn, () => {
@@ -744,10 +1011,22 @@ function wire() {
   onClick($('start-helper'), () => startHelper().catch((e) => showFatal(e.message)));
   onClick(sendBtn, sendPrompt);
   onClick(stopBtn, () => request('chat-stop'));
-  // The New button sits in the Chat header; don't let its click collapse the section.
-  newChatBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!hasClass(newChatBtn, 'is-disabled')) request('chat-new');
+  onClick(newChatBtn, () => {
+    showChatList(false);
+    request('chat-create');
+  });
+  $('chat-picker').addEventListener('click', () => showChatList(hasClass($('chat-list'), 'hidden')));
+  onClick($('chat-rename-save'), () => {
+    const title = getValue('chat-rename').trim();
+    if (title && currentChatId) request('chat-rename', { chatId: currentChatId, title });
+    showChatList(false);
+  });
+  onClick($('chat-delete'), deleteCurrentChat);
+  onClick($('open-chat'), openChatWindow);
+  $('quota-chip').addEventListener('click', () => {
+    const opening = hasClass($('usage-pop'), 'hidden');
+    showChatList(false);
+    show($('usage-pop'), opening);
   });
   promptEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

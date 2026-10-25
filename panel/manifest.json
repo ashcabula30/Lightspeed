@@ -13,6 +13,14 @@
       "minimumSize": { "width": 300, "height": 260 },
       "preferredDockedSize": { "width": 360, "height": 560 },
       "preferredFloatingSize": { "width": 400, "height": 620 }
+    },
+    {
+      "type": "panel",
+      "id": "editingAssistantChat",
+      "label": { "default": "Editing Assistant Chat" },
+      "minimumSize": { "width": 300, "height": 300 },
+      "preferredDockedSize": { "width": 380, "height": 600 },
+      "preferredFloatingSize": { "width": 440, "height": 680 }
     }
   ],
   "requiredPermissions": {

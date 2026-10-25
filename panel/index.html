@@ -17,15 +17,15 @@
   <div id="recovery" class="notice notice-warn hidden">
     <div id="recovery-text">Premiere wants a safety check before more edits.</div>
     <div class="btn-row">
-      <div class="btn btn-secondary btn-small grow" id="recovery-check" role="button">Review safety check</div>
+      <div class="btn btn-secondary btn-small" id="recovery-check" role="button">Review safety check</div>
       <div class="btn btn-primary btn-small hidden" id="recovery-ack" role="button">Continue</div>
     </div>
   </div>
 
-  <!-- Clients -->
+  <!-- Client -->
   <div class="panel" data-panel="clients">
     <div class="panel-head">
-      <span class="chevron">&#9656;</span>
+      <span class="tri"></span>
       <span class="panel-title">Client</span>
       <span class="panel-meta" id="client-meta">None chosen</span>
     </div>
@@ -34,55 +34,47 @@
         <option value="">Choose a client…</option>
       </select>
       <div id="client-guide" class="guide hidden"></div>
-      <div id="client-empty" class="hint">The guide shows fonts, text rules, must-dos and where files live. QA lists the must-dos of the client you pick.</div>
+      <div id="client-empty" class="hint">Fonts, text rules and must-dos for the client.</div>
     </div>
   </div>
 
   <!-- Auto-cut -->
   <div class="panel" data-panel="autocut">
     <div class="panel-head">
-      <span class="chevron">&#9656;</span>
+      <span class="tri"></span>
       <span class="panel-title">Auto-cut</span>
       <span class="panel-meta" id="ac-meta">Active sequence</span>
     </div>
     <div class="panel-body">
-      <div class="field">
-        <label class="label" for="ac-pause">Pause between lines</label>
+      <div class="prop-row">
+        <label class="prop-label" for="ac-pause">Pause between lines</label>
         <div class="input-suffix">
           <div class="field-box"><input id="ac-pause" class="input" type="number" min="0.1" max="3" step="0.1" value="0.5"></div>
           <span class="suffix">sec</span>
         </div>
       </div>
 
-      <div class="switch-row on" id="ac-retakes">
-        <div class="switch-text">
-          <div class="switch-title">Remove retakes</div>
-          <div class="hint">Cuts the bad attempt before a slate like "take again"</div>
-        </div>
+      <div class="switch-row on" id="ac-retakes" title="Cuts the bad attempt before a slate like &quot;take again&quot;">
+        <div class="switch-text"><div class="switch-title">Remove retakes</div></div>
         <div class="switch"><div class="knob"></div></div>
       </div>
-      <div class="switch-row on" id="ac-ums">
-        <div class="switch-text">
-          <div class="switch-title">Remove ums and breaths</div>
-          <div class="hint">Only sounds inside pauses, never words</div>
-        </div>
+      <div class="switch-row on" id="ac-ums" title="Only sounds inside pauses, never words">
+        <div class="switch-text"><div class="switch-title">Remove ums and breaths</div></div>
         <div class="switch"><div class="knob"></div></div>
       </div>
 
-      <div class="disclosure" id="ac-more-toggle"><span class="chevron small-chevron">&#9656;</span>More options</div>
+      <div class="disclosure" id="ac-more-toggle"><span class="tri" id="ac-more-tri"></span>More options</div>
       <div id="ac-more" class="hidden">
-        <div class="field">
-          <label class="label" for="ac-threshold">Silence threshold</label>
+        <div class="prop-row">
+          <label class="prop-label" for="ac-threshold" title="Leave empty to measure it from the recording">Silence threshold</label>
           <div class="input-suffix">
             <div class="field-box"><input id="ac-threshold" class="input" type="number" min="-70" max="-20" step="1" placeholder="Auto"></div>
             <span class="suffix">dB</span>
           </div>
-          <div class="hint">Leave empty to measure it from the recording.</div>
         </div>
         <div class="field">
-          <label class="label" for="ac-slates">Retake words</label>
+          <label class="label" for="ac-slates" title="Comma separated, e.g. take again, from the top">Retake words</label>
           <div class="field-box"><input id="ac-slates" class="input" type="text" value="take again"></div>
-          <div class="hint">Comma separated, e.g. take again, from the top</div>
         </div>
       </div>
 
@@ -91,12 +83,11 @@
       </div>
 
       <div id="ac-working" class="working hidden">
-        <div id="ac-progress" class="working-text"></div>
-        <div class="bar"><div id="ac-bar" class="bar-fill bar-accent"></div></div>
         <div class="btn-row">
-          <span class="hint grow">Stop finishes the current step first, so nothing is left half-cut.</span>
-          <div class="btn btn-secondary btn-small" id="ac-stop" role="button">Stop</div>
+          <span id="ac-progress" class="working-text grow"></span>
+          <div class="btn btn-secondary btn-small" id="ac-stop" role="button" title="Finishes the current step first, so nothing is left half-cut">Stop</div>
         </div>
+        <div class="bar"><div id="ac-bar" class="bar-fill bar-accent"></div></div>
       </div>
 
       <div id="ac-results" class="result hidden">
@@ -109,15 +100,14 @@
         </div>
         <div class="chips" id="ac-chips"></div>
         <div id="ac-apply-area">
-          <div id="ac-marker-note" class="notice notice-info hidden">Markers are on the timeline: red is a retake, yellow an um, white a pause. Delete a marker in Premiere to keep that part, then Apply.</div>
+          <div id="ac-marker-note" class="notice notice-info hidden">Red retake, yellow um, white pause. Delete a marker in Premiere to keep that part.</div>
           <div class="btn-row">
             <div class="btn btn-secondary grow" id="ac-markers" role="button">Preview as markers</div>
-            <div class="btn btn-ghost hidden" id="ac-clear-markers" role="button">Clear markers</div>
+            <div class="btn btn-ghost hidden" id="ac-clear-markers" role="button">Clear</div>
           </div>
           <div class="actions">
-            <div class="btn btn-primary btn-block" id="ac-apply" role="button">Apply cuts</div>
+            <div class="btn btn-primary btn-block" id="ac-apply" role="button" title="A backup copy of the sequence is made first">Apply cuts</div>
           </div>
-          <div class="hint center">A backup copy of the sequence is made first.</div>
         </div>
       </div>
 
@@ -132,7 +122,7 @@
   <!-- Review: QA and handoff -->
   <div class="panel" data-panel="review">
     <div class="panel-head">
-      <span class="chevron">&#9656;</span>
+      <span class="tri"></span>
       <span class="panel-title">Review</span>
       <span class="panel-meta" id="qa-meta">QA and handoff</span>
     </div>
@@ -152,8 +142,8 @@
 
       <div class="divider"></div>
       <div class="field">
-        <label class="label" for="handoff-extra">Note for the reviewer (optional)</label>
-        <div class="field-box"><input id="handoff-extra" class="input" type="text" placeholder="e.g. hook text wasn't in the brief, used option B"></div>
+        <label class="label" for="handoff-extra">Note for the reviewer</label>
+        <div class="field-box"><input id="handoff-extra" class="input" type="text" placeholder="Optional"></div>
       </div>
       <div class="btn btn-secondary btn-block" id="handoff-make" role="button">Draft handoff note</div>
       <div id="handoff-out" class="hidden">
@@ -161,49 +151,25 @@
           <textarea id="handoff-text" class="input handoff-text"></textarea>
         </div>
         <div class="btn-row">
-          <span id="handoff-copied" class="hint grow">Paste it into ClickUp or Slack yourself. Nothing is posted.</span>
+          <span id="handoff-copied" class="hint grow">Nothing is posted; paste it yourself.</span>
           <div class="btn btn-primary btn-small" id="handoff-copy" role="button">Copy</div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Chat -->
+  <!-- Chat: the conversation lives in the Editing Assistant Chat panel -->
   <div class="panel" data-panel="chat">
     <div class="panel-head">
-      <span class="chevron">&#9656;</span>
+      <span class="tri"></span>
       <span class="panel-title">Chat</span>
       <span class="panel-meta" id="chat-meta">Claude Code</span>
-      <span class="btn btn-ghost btn-small" id="new-chat" role="button">New</span>
     </div>
     <div class="panel-body">
-      <div class="usage-box">
-        <div class="usage" id="usage">
-          <div class="usage-item">
-            <div class="usage-row"><span class="usage-label">5-hour</span><span id="u5-text" class="usage-value">—</span></div>
-            <div class="bar"><div id="u5-fill" class="bar-fill"></div></div>
-          </div>
-          <div class="usage-item">
-            <div class="usage-row"><span class="usage-label">Weekly</span><span id="u7-text" class="usage-value">—</span></div>
-            <div class="bar"><div id="u7-fill" class="bar-fill"></div></div>
-          </div>
-        </div>
-        <div class="btn-row usage-foot">
-          <span id="usage-reset" class="usage-reset grow">No usage numbers yet. Press Check.</span>
-          <div class="btn btn-ghost btn-small" id="usage-check" role="button">Check</div>
-        </div>
-      </div>
-      <div id="messages" class="messages">
-        <div class="empty">Ask about your project, the timeline, or anything else. Claude can read Premiere; edits come later.</div>
-      </div>
-      <div id="activity" class="activity"></div>
-      <div class="composer">
-        <textarea id="prompt" class="input composer-input" placeholder="Message Claude"></textarea>
-        <div class="composer-row">
-          <span class="hint">Enter to send, Shift+Enter for a new line</span>
-          <div class="btn btn-secondary btn-small hidden" id="stop" role="button">Stop</div>
-          <div class="btn btn-primary btn-small" id="send" role="button">Send</div>
-        </div>
+      <div id="usage-summary" class="usage-summary">No usage numbers yet.</div>
+      <div class="btn-row">
+        <div class="btn btn-primary btn-small" id="open-chat" role="button">Open chat window</div>
+        <span class="info" id="open-chat-info" title="Also under Window › UXP Plugins › Editing Assistant Chat. Drag its tab out to float it.">i</span>
       </div>
     </div>
   </div>
@@ -211,15 +177,17 @@
   <!-- Setup -->
   <div class="panel" data-panel="setup">
     <div class="panel-head">
-      <span class="chevron">&#9656;</span>
+      <span class="tri"></span>
       <span class="panel-title">Setup</span>
       <span class="panel-meta" id="setup-meta">Checking…</span>
     </div>
     <div class="panel-body">
       <div id="start-area" class="hidden">
-        <div class="btn btn-primary btn-block" id="start-helper" role="button">Start helper</div>
-        <div class="hint center">Opens the helper in a small window. To have it start by itself at login, run install-autostart.cmd in the helper folder once.</div>
-        <div id="start-status" class="hint center start-status"></div>
+        <div class="btn-row">
+          <div class="btn btn-primary btn-small" id="start-helper" role="button">Start helper</div>
+          <span class="info" title="To start it by itself at login, run install-autostart.cmd in the helper folder once.">i</span>
+        </div>
+        <div id="start-status" class="hint start-status"></div>
         <div class="divider"></div>
       </div>
       <ul id="checks" class="checks"></ul>
@@ -231,6 +199,61 @@
   </div>
 
 </div>
+
+<!-- Chat window (the plugin's second panel, Editing Assistant Chat) -->
+<div id="chat-app" class="chat-app">
+  <header class="chat-top">
+    <div class="chat-picker" id="chat-picker" role="button" title="Your chats">
+      <span id="chat-title" class="chat-title">New chat</span>
+      <span class="tri tri-open" id="chat-picker-tri"></span>
+    </div>
+    <div class="quota" id="quota-chip" role="button" title="Claude plan usage">Claude —</div>
+    <div class="btn btn-ghost btn-small btn-icon" id="new-chat" role="button" title="New chat">+</div>
+  </header>
+
+  <div id="usage-pop" class="popover usage-pop hidden">
+    <div class="usage" id="usage">
+      <div class="usage-item">
+        <div class="usage-row"><span class="usage-label">5-hour</span><span id="u5-text" class="usage-value">—</span></div>
+        <div class="bar"><div id="u5-fill" class="bar-fill"></div></div>
+      </div>
+      <div class="usage-item">
+        <div class="usage-row"><span class="usage-label">Weekly</span><span id="u7-text" class="usage-value">—</span></div>
+        <div class="bar"><div id="u7-fill" class="bar-fill"></div></div>
+      </div>
+    </div>
+    <div class="btn-row usage-foot">
+      <span id="usage-reset" class="usage-reset grow">No usage numbers yet.</span>
+      <div class="btn btn-secondary btn-small" id="usage-check" role="button" title="One tiny request to Claude's cheapest model">Check</div>
+    </div>
+  </div>
+
+  <div id="chat-list" class="popover chat-list hidden">
+    <div id="chat-list-items" class="chat-list-items"></div>
+    <div class="chat-list-foot">
+      <div class="field-box"><input id="chat-rename" class="input" type="text" placeholder="Chat name"></div>
+      <div class="btn-row">
+        <div class="btn btn-secondary btn-small" id="chat-rename-save" role="button">Rename</div>
+        <span class="grow"></span>
+        <div class="btn btn-ghost btn-small" id="chat-delete" role="button">Delete chat</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="messages" class="messages chat-messages">
+    <div class="empty">Ask about the project or the timeline. Claude reads Premiere and asks before editing.</div>
+  </div>
+  <div id="activity" class="activity"></div>
+  <div class="composer chat-composer">
+    <textarea id="prompt" class="input composer-input" placeholder="Message Claude"></textarea>
+    <div class="composer-row">
+      <span class="hint">Enter to send · Shift+Enter for new line</span>
+      <div class="btn btn-secondary btn-small hidden" id="stop" role="button">Stop</div>
+      <div class="btn btn-primary btn-small" id="send" role="button">Send</div>
+    </div>
+  </div>
+</div>
+<script src="markdown.js"></script>
 <script src="main.js"></script>
 <script src="features.js"></script>
 </body>

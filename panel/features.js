@@ -6,26 +6,7 @@ let clientId = recall(CLIENT_KEY, '');
 let clientName = '';
 
 // ---------- client guide ----------
-// A small Markdown renderer for the knowledge base's client pages: headings, nested bullets,
-// **bold**, `code` and [links] (shown as text). Builds DOM nodes, never innerHTML.
-function inlineNodes(text) {
-  const frag = document.createDocumentFragment();
-  const re = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\([^)]+\)|\*([^*]+)\*/g;
-  let last = 0, m;
-  while ((m = re.exec(text))) {
-    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-    const span = document.createElement('span');
-    if (m[1]) { span.className = 'md-bold'; span.textContent = m[1]; }
-    else if (m[2]) { span.className = 'md-code'; span.textContent = m[2]; }
-    else if (m[3]) { span.className = 'md-link'; span.textContent = m[3]; }
-    else { span.className = 'md-dim'; span.textContent = m[4]; }
-    frag.appendChild(span);
-    last = re.lastIndex;
-  }
-  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-  return frag;
-}
-
+// Client pages render through markdown.js (inlineNodes) for **bold**, `code` and [links].
 function renderGuide(markdown) {
   const box = $('client-guide');
   box.innerHTML = '';
