@@ -6,9 +6,11 @@ import { ClaudeChat } from './claude.js';
 import { loadConfig } from './config.js';
 import { analyzeSequence } from './autocut/index.js';
 import { applyCuts } from './autocut/apply.js';
+import { makeGraphic } from './graphics/index.js';
+import { fillSpec } from './graphics/fill.js';
 
 export const PORT = Number(process.env.EA_PORT || 7790);
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const config = loadConfig();
 
 const wss = new WebSocketServer({ host: '127.0.0.1', port: PORT, path: '/panel' });
@@ -25,6 +27,24 @@ const chat = new ClaudeChat({ workdir: config.workdir, onEvent: broadcast });
 
 // Auto-cut: one job at a time; Apply only ever uses the most recent analysis.
 const autocut = { busy: false, analysis: null };
+
+// Graphics: one fill or render at a time.
+const gfx = { busy: false };
+
+async function runGraphics(kind, job) {
+  if (gfx.busy) throw new Error('A graphic is already being made.');
+  gfx.busy = true;
+  broadcast({ type: 'gfx-busy', busy: true, kind });
+  try {
+    await job();
+  } catch (err) {
+    console.error(`[helper] graphics ${kind} failed:`, err);
+    broadcast({ type: 'gfx-error', kind, error: err.message });
+  } finally {
+    gfx.busy = false;
+    broadcast({ type: 'gfx-busy', busy: false, kind });
+  }
+}
 
 async function runAutocut(kind, job) {
   if (autocut.busy) throw new Error('Auto-cut is already running.');
@@ -67,6 +87,17 @@ wss.on('connection', (ws) => {
         case 'chat-new':
           chat.reset();
           return broadcast({ type: 'chat-cleared' });
+        case 'gfx-fill':
+          return await runGraphics('fill', async () => {
+            broadcast({ type: 'gfx-progress', label: 'Claude is filling in the fields…' });
+            const r = await fillSpec(msg.kind, msg.prompt || '', config.workdir);
+            broadcast({ type: 'gfx-filled', ...r });
+          });
+        case 'gfx-make':
+          return await runGraphics('make', async () => {
+            const r = await makeGraphic(msg.spec, config.graphics, (label) => broadcast({ type: 'gfx-progress', label }));
+            broadcast({ type: 'gfx-placed', result: r });
+          });
         case 'autocut-analyze':
           return await runAutocut('analyze', async () => {
             autocut.analysis = null;

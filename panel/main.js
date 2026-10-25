@@ -46,6 +46,7 @@ function setConnection(isOnline) {
 
 function updateControls() {
   if (typeof acUpdateControls === 'function') acUpdateControls();
+  if (typeof gfxUpdateControls === 'function') gfxUpdateControls();
   sendBtn.disabled = !online || busy;
   newChatBtn.disabled = !online || busy;
   stopBtn.className = busy ? '' : 'hidden';
@@ -143,6 +144,7 @@ function sendPrompt() {
 
 function handleMessage(msg) {
   if (handleAutocut(msg)) return;
+  if (handleGraphics(msg)) return;
   switch (msg.type) {
     case 'hello':
       if (msg.busy) setBusy(true);
@@ -313,6 +315,96 @@ function handleAutocut(msg) {
       done.textContent = msg.error;
       return true;
     }
+    default:
+      return false;
+  }
+}
+
+// ---------- graphics ----------
+const gfxFillBtn = $('gfx-fill');
+const gfxMakeBtn = $('gfx-make');
+let gfxBusy = false;
+
+function gfxShowFields() {
+  const kind = $('gfx-kind').value;
+  $('gfx-card-fields').className = kind === 'card' ? '' : 'hidden';
+  $('gfx-keyword-fields').className = kind === 'keywords' ? '' : 'hidden';
+  $('gfx-quote-fields').className = kind === 'quote' ? '' : 'hidden';
+}
+
+function gfxUpdateControls() {
+  gfxFillBtn.disabled = !online || gfxBusy;
+  gfxMakeBtn.disabled = !online || gfxBusy;
+}
+
+function gfxSpec() {
+  const kind = $('gfx-kind').value;
+  const durationSeconds = Number($('gfx-duration').value) || 3.5;
+  if (kind === 'card') {
+    return { kind, text: $('gfx-text').value.trim(), highlight: $('gfx-highlight').value.trim() || null, look: $('gfx-look').value, durationSeconds };
+  }
+  if (kind === 'keywords') {
+    const words = $('gfx-words').value.split('\n').map((l) => l.trim()).filter(Boolean)
+      .map((l) => (l.startsWith('!') ? { text: l.slice(1).trim(), red: true } : { text: l, red: false }));
+    return { kind, words, durationSeconds };
+  }
+  return { kind, text: $('gfx-quote').value.trim(), durationSeconds };
+}
+
+function gfxApplySpec(spec) {
+  $('gfx-kind').value = spec.kind;
+  gfxShowFields();
+  if (spec.durationSeconds) $('gfx-duration').value = String(spec.durationSeconds);
+  if (spec.kind === 'card') {
+    $('gfx-text').value = spec.text || '';
+    $('gfx-highlight').value = spec.highlight || '';
+    if (spec.look) $('gfx-look').value = spec.look;
+  } else if (spec.kind === 'keywords') {
+    $('gfx-words').value = (spec.words || []).map((w) => (w.red ? '!' : '') + w.text).join('\n');
+  } else {
+    $('gfx-quote').value = spec.text || '';
+  }
+}
+
+function gfxNote(kind, text) {
+  const el = $('gfx-done');
+  el.className = `bubble bubble-${kind}`;
+  el.textContent = text;
+}
+
+$('gfx-kind').addEventListener('change', gfxShowFields);
+gfxFillBtn.addEventListener('click', () => {
+  $('gfx-done').className = 'hidden';
+  request('gfx-fill', { kind: $('gfx-kind').value, prompt: $('gfx-prompt').value });
+});
+gfxMakeBtn.addEventListener('click', () => {
+  $('gfx-done').className = 'hidden';
+  $('gfx-progress').textContent = 'Starting…';
+  request('gfx-make', { spec: gfxSpec() });
+});
+
+function handleGraphics(msg) {
+  switch (msg.type) {
+    case 'gfx-busy':
+      gfxBusy = msg.busy;
+      gfxUpdateControls();
+      if (!msg.busy) $('gfx-progress').textContent = '';
+      return true;
+    case 'gfx-progress':
+      $('gfx-progress').textContent = msg.label;
+      return true;
+    case 'gfx-filled':
+      gfxApplySpec(msg.spec);
+      gfxNote('note', msg.usedTranscript ? 'Filled from what is said at the playhead. Check the wording, then Render & place.' : 'Filled from your description. Check it, then Render & place.');
+      return true;
+    case 'gfx-placed': {
+      const r = msg.result;
+      gfxNote('note', `Placed on V${r.track} at ${mmss(r.start)} in "${r.sequence}" (${r.durationSeconds}s).`);
+      return true;
+    }
+    case 'gfx-error':
+      gfxNote('error', msg.error);
+      return true;
     default:
       return false;
   }

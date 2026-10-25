@@ -77,6 +77,73 @@
     <div id="ac-done" class="hidden"></div>
   </section>
 
+  <section id="gfx-section">
+    <div class="section-head">
+      <h3>Graphics</h3>
+      <span class="muted small">Placed at the playhead</span>
+    </div>
+    <div class="field">
+      <label for="gfx-kind">Type</label>
+      <select id="gfx-kind">
+        <option value="card">Statement card (full screen)</option>
+        <option value="keywords">Keyword pop-ins (over the speaker)</option>
+        <option value="quote">Quote (lower third)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="gfx-prompt">Describe it (optional)</label>
+      <textarea id="gfx-prompt" class="short" placeholder="e.g. red card about the cardinal mistake. Leave blank to use what is said at the playhead."></textarea>
+    </div>
+    <div class="row">
+      <span class="muted small grow">Uses the transcript at the playhead if Auto-cut analysed this footage.</span>
+      <button id="gfx-fill">Fill from prompt</button>
+    </div>
+
+    <div id="gfx-card-fields">
+      <div class="field">
+        <label for="gfx-text">Text (Enter for a line break)</label>
+        <textarea id="gfx-text" class="short"></textarea>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label for="gfx-highlight">Highlight word</label>
+          <input id="gfx-highlight" type="text">
+        </div>
+        <div class="field">
+          <label for="gfx-look">Look</label>
+          <select id="gfx-look">
+            <option value="dark">Dark grid</option>
+            <option value="light">White satin</option>
+            <option value="red">Red</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="gfx-keyword-fields" class="hidden">
+      <div class="field">
+        <label for="gfx-words">Keywords, one per line (start with ! for red)</label>
+        <textarea id="gfx-words" class="short"></textarea>
+      </div>
+    </div>
+    <div id="gfx-quote-fields" class="hidden">
+      <div class="field">
+        <label for="gfx-quote">Quote</label>
+        <input id="gfx-quote" type="text">
+      </div>
+    </div>
+    <div class="field-grid">
+      <div class="field">
+        <label for="gfx-duration">Duration (s)</label>
+        <input id="gfx-duration" type="number" min="1.5" max="10" step="0.5" value="3.5">
+      </div>
+    </div>
+    <div class="row">
+      <button id="gfx-make">Render &amp; place</button>
+    </div>
+    <div id="gfx-progress" class="muted small"></div>
+    <div id="gfx-done" class="hidden"></div>
+  </section>
+
   <section id="chat-section">
     <div class="section-head">
       <h3>Chat</h3>

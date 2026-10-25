@@ -10,6 +10,8 @@ const CONFIG_PATH = path.join(here, '..', 'config.json');
 const DEFAULTS = {
   // Folder Claude Code runs in. Its CLAUDE.md and project settings apply to panel chats.
   workdir: os.homedir(),
+  // Tesseract graphics: one font for all text, and a looping background video per card look.
+  graphics: { fontFile: null, backgrounds: {} },
 };
 
 export function loadConfig() {
