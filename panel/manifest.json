@@ -16,6 +16,7 @@
     }
   ],
   "requiredPermissions": {
-    "network": { "domains": "all" }
+    "network": { "domains": "all" },
+    "launchProcess": { "schemes": [], "extensions": [".cmd"] }
   }
 }

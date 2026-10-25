@@ -18,15 +18,17 @@ async function audioClips(sequenceId) {
   return { info, clips };
 }
 
-export async function analyzeSequence(sequenceId, settings, onStep = () => {}) {
+// Loudness frames and transcript words for the A1 dialogue, mapped onto timeline time.
+// Shared by auto-cut and captions; transcripts are cached per source file.
+export async function readSequenceAudio(sequenceId, onStep = () => {}) {
   onStep('Reading the sequence');
   const state = await call('get_premiere_state');
   const seqId = sequenceId || (state.activeSequence && state.activeSequence.id);
-  if (!seqId) throw new Error('No active sequence. Open the sequence you want to cut.');
+  if (!seqId) throw new Error('No active sequence. Open the sequence you want to work on.');
   const { info, clips } = await audioClips(seqId);
   if (!clips.length) throw new Error('Track A1 has no clips to analyse.');
   const odd = clips.find((c) => c.speed !== 1);
-  if (odd) throw new Error(`A clip on A1 has speed ${odd.speed}. Auto-cut only handles clips at 100% speed for now.`);
+  if (odd) throw new Error(`A clip on A1 has speed ${odd.speed}. Only clips at 100% speed are supported for now.`);
   const fps = Math.round(1 / info.frameRate.seconds);
 
   const sources = new Map();
@@ -34,10 +36,14 @@ export async function analyzeSequence(sequenceId, settings, onStep = () => {}) {
   for (const [i, p] of paths.entries()) {
     sources.set(p, await analyzeSource(p, (label) => onStep(`${label} (${i + 1}/${paths.length})`)));
   }
-
-  onStep('Planning cuts');
   const timeline = buildTimeline(clips.map((c) => ({ start: c.startSeconds, end: c.endSeconds, inPoint: c.inPointSeconds, mediaPath: c.sourceMediaPath })),
     sources, info.durationSeconds);
-  const plan = planCuts(timeline, settings, fps, info.durationSeconds);
-  return { sequence: { id: seqId, name: info.name, fps, duration: info.durationSeconds }, ...plan };
+  return { sequence: { id: seqId, name: info.name, fps, duration: info.durationSeconds }, timeline };
+}
+
+export async function analyzeSequence(sequenceId, settings, onStep = () => {}) {
+  const { sequence, timeline } = await readSequenceAudio(sequenceId, onStep);
+  onStep('Planning cuts');
+  const plan = planCuts(timeline, settings, sequence.fps, sequence.duration);
+  return { sequence, ...plan };
 }

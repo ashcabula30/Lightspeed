@@ -1,3 +1,4 @@
 {
-  "workdir": "C:\\path\\to\\the\\folder\\Claude\\should\\work\\in"
+  "workdir": "C:/path/to/the/folder/Claude/should/work/in",
+  "knowledgeBase": "Optional. Defaults to <workdir>/knowledge-base (client guides are read from its clients folder)"
 }

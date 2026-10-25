@@ -20,5 +20,7 @@ export function loadConfig() {
     console.warn(`[helper] workdir ${cfg.workdir} does not exist; using ${DEFAULTS.workdir}`);
     cfg.workdir = DEFAULTS.workdir;
   }
+  // Client guides and QA notes come from the knowledge base (its clients/ folder).
+  if (!cfg.knowledgeBase) cfg.knowledgeBase = path.join(cfg.workdir, 'knowledge-base');
   return cfg;
 }

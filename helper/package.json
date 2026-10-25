@@ -1,8 +1,8 @@
 {
   "name": "editing-assistant-helper",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Local helper for the Editing Assistant Premiere Pro panel: dependency checks now; Claude Code, auto-cut and Tesseract tools in later steps.",
+  "description": "Local helper for the Editing Assistant Premiere Pro panel: setup checks, Claude Code chat, auto-cut, captions, client guides, QA and handoff.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {

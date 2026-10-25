@@ -1,10 +1,105 @@
-// Editing Assistant panel: talks to the local helper for the setup checklist,
-// the Claude Code chat and the plan usage meter.
+// Editing Assistant panel: talks to the local helper for auto-cut, the Claude Code chat,
+// the setup checklist and the plan usage meter. Clients, captions and review live in features.js.
+// UXP's DOM is partial: stick to className, getAttribute and plain loops (no dataset,
+// classList.toggle(force), NodeList spreading or Element.remove()).
 const HELPER_URL = 'ws://127.0.0.1:7790/panel';
 const RECONNECT_MS = 3000;
+const STORE_KEY = 'ea-open-panels';
+const USAGE_WARN = 0.85; // ask before sending a chat message past 85% of the 5-hour limit
 
 const $ = (id) => document.getElementById(id);
-const connEl = $('conn');
+const IN_UXP = (() => {
+  try { return typeof require === 'function' && !!require('uxp'); } catch (e) { return false; }
+})();
+
+// Show script errors in the panel itself, so a failure is never just "nothing works".
+function showFatal(text) {
+  let el = $('fatal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'fatal';
+    el.className = 'notice notice-error';
+    $('app').insertBefore(el, $('app').firstChild);
+  }
+  el.textContent = `Panel error: ${text}`;
+}
+window.addEventListener('error', (e) => showFatal(e.message || String(e.error)));
+
+// ---------- small UI helpers ----------
+function hasClass(el, name) {
+  return (' ' + el.className + ' ').indexOf(' ' + name + ' ') >= 0;
+}
+function setClass(el, name, on) {
+  const parts = el.className.split(' ').filter((c) => c && c !== name);
+  if (on) parts.push(name);
+  el.className = parts.join(' ');
+}
+function each(selector, fn) {
+  const list = document.querySelectorAll(selector);
+  for (let i = 0; i < list.length; i++) fn(list[i]);
+}
+// Buttons are divs (full styling control in UXP), so "disabled" is a class.
+function setDisabled(el, value) {
+  setClass(el, 'is-disabled', !!value);
+}
+function onClick(el, fn) {
+  el.addEventListener('click', (e) => {
+    if (hasClass(el, 'is-disabled')) return;
+    fn(e);
+  });
+}
+// UXP doesn't restyle children when only a parent's class changes, so visibility
+// is set inline on the element itself.
+function show(el, visible) {
+  setClass(el, 'hidden', !visible);
+  el.style.display = visible ? '' : 'none';
+}
+function setSwitch(row, on) {
+  setClass(row, 'on', on);
+  setClass(row.querySelector('.switch'), 'switch-on', on);
+  setClass(row.querySelector('.knob'), 'knob-on', on);
+}
+function isOn(id) {
+  return hasClass($(id), 'on');
+}
+function setMeta(id, text, tone) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = `panel-meta${tone ? ' meta-' + tone : ''}`;
+}
+function mmss(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function store(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage unavailable */ }
+}
+function recall(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key));
+    return v === null || v === undefined ? fallback : v;
+  } catch (e) { return fallback; }
+}
+
+// Premiere's plain native inputs have no inner padding (CSS padding shrinks the box and
+// clips the text), so inside Premiere swap them for the built-in Spectrum fields, which
+// have proper spacing. Runs before any element lookups.
+function useSpectrumFields() {
+  each('.input', (old) => {
+    const isArea = old.tagName === 'TEXTAREA';
+    const field = document.createElement(isArea ? 'sp-textarea' : 'sp-textfield');
+    field.id = old.id;
+    field.className = isArea ? `sp-input sp-area ${old.className.replace(/\binput\b/, '')}` : 'sp-input';
+    if (old.getAttribute('placeholder')) field.setAttribute('placeholder', old.getAttribute('placeholder'));
+    if (old.value) field.setAttribute('value', old.value);
+    old.parentElement.replaceChild(field, old);
+  });
+  each('.field-box, .composer, .select', (box) => setClass(box, 'native-ui', true));
+}
+if (IN_UXP) {
+  try { useSpectrumFields(); } catch (e) { showFatal(e.message); }
+}
+
 const checksEl = $('checks');
 const checkedAtEl = $('checked-at');
 const refreshBtn = $('refresh');
@@ -18,8 +113,12 @@ const newChatBtn = $('new-chat');
 let ws = null;
 let nextId = 1;
 let online = false;
-let busy = false;
-let currentReply = null; // the assistant bubble being streamed into
+let busy = false;           // chat is answering
+let jobBusy = false;        // a Premiere job (auto-cut, captions, QA) is running in the helper
+let currentReply = null;    // the assistant message being streamed into
+const messageHooks = [];    // features.js handlers: return true when a message was theirs
+const controlHooks = [];    // features.js: refresh enabled/disabled state
+const connectHooks = [];    // features.js: run when the helper connects
 
 function request(type, extra = {}) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -27,62 +126,118 @@ function request(type, extra = {}) {
   return true;
 }
 
+// ---------- collapsible panels ----------
+function saveOpenPanels() {
+  const open = [];
+  each('.panel', (p) => { if (hasClass(p, 'open')) open.push(p.getAttribute('data-panel')); });
+  store(STORE_KEY, open);
+}
+function setPanelOpen(panel, open) {
+  setClass(panel, 'open', open);
+  const head = panel.querySelector('.panel-head');
+  setClass(head, 'panel-head-open', open);
+  head.querySelector('.chevron').textContent = open ? '▾' : '▸';
+  panel.querySelector('.panel-body').style.display = open ? 'block' : 'none';
+}
+function initPanels() {
+  const saved = recall(STORE_KEY, null);
+  const initiallyOpen = Array.isArray(saved) ? saved : ['clients', 'autocut', 'chat'];
+  each('.panel', (panel) => {
+    setPanelOpen(panel, initiallyOpen.indexOf(panel.getAttribute('data-panel')) >= 0);
+    panel.querySelector('.panel-head').addEventListener('click', () => {
+      setPanelOpen(panel, !hasClass(panel, 'open'));
+      saveOpenPanels();
+    });
+  });
+}
+
 // ---------- connection ----------
 function setConnection(isOnline) {
   online = isOnline;
-  connEl.textContent = isOnline ? 'Helper connected' : 'Helper offline';
-  connEl.className = isOnline ? 'pill pill-on' : 'pill pill-off';
-  refreshBtn.disabled = !isOnline;
+  $('conn-text').textContent = isOnline ? 'Connected' : 'Offline';
+  $('conn').firstElementChild.className = `dot ${isOnline ? 'dot-on' : 'dot-off'}`;
+  show($('start-area'), !isOnline && IN_UXP);
   if (!isOnline) {
+    jobBusy = false;
     setBusy(false);
     checksEl.innerHTML = '';
     const li = document.createElement('li');
-    li.className = 'muted';
-    li.textContent = 'Start the helper (npm start in the helper folder). Retrying…';
+    li.className = 'check-empty';
+    li.textContent = IN_UXP
+      ? 'The helper is not running. Press Start helper above. Retrying…'
+      : 'The helper is not running. Start it with npm start in the helper folder. Retrying…';
     checksEl.appendChild(li);
+    setMeta('setup-meta', 'Helper offline', 'bad');
   }
   updateControls();
 }
 
 function updateControls() {
-  if (typeof acUpdateControls === 'function') acUpdateControls();
-  sendBtn.disabled = !online || busy;
-  newChatBtn.disabled = !online || busy;
-  stopBtn.className = busy ? '' : 'hidden';
+  acUpdateControls();
+  setDisabled(refreshBtn, !online);
+  setDisabled(sendBtn, !online || busy);
+  setDisabled(newChatBtn, !online || busy);
+  show(stopBtn, busy);
+  for (const h of controlHooks) h();
 }
 
 function setBusy(value) {
   busy = value;
   if (!value) activityEl.textContent = '';
+  setMeta('chat-meta', value ? 'Replying…' : 'Claude Code', value ? 'busy' : '');
   updateControls();
 }
 
+// Opens helper/start-helper.cmd (next to the panel folder) in a console window.
+async function startHelper() {
+  const uxp = require('uxp');
+  const folder = await uxp.storage.localFileSystem.getPluginFolder();
+  const sep = folder.nativePath.indexOf('\\') >= 0 ? '\\' : '/';
+  const parent = folder.nativePath.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '');
+  const script = `${parent}${sep}helper${sep}start-helper.cmd`;
+  const result = await uxp.shell.openPath(script, 'Starts the Editing Assistant helper so the panel can connect.');
+  if (result) showFatal(`Couldn't start the helper (${result}). Run ${script} yourself.`);
+}
+
 // ---------- setup checklist ----------
-const ICON = { ok: '✓', warn: '!', missing: '✗' };
+const DOT = { ok: 'dot-on', warn: 'dot-warn', missing: 'dot-off' };
+
+function checkRow(state, titleText, detailText) {
+  const li = document.createElement('li');
+  li.className = 'check';
+  const dot = document.createElement('span');
+  dot.className = `dot ${DOT[state] || ''}`;
+  const body = document.createElement('div');
+  body.className = 'check-body';
+  const title = document.createElement('div');
+  title.className = 'check-title';
+  title.textContent = titleText;
+  body.appendChild(title);
+  if (detailText) {
+    const detail = document.createElement('div');
+    detail.className = 'check-detail';
+    detail.textContent = detailText;
+    body.appendChild(detail);
+  }
+  li.appendChild(dot);
+  li.appendChild(body);
+  return li;
+}
 
 function renderChecks(status) {
   checksEl.innerHTML = '';
-  for (const c of status.checks) {
-    const li = document.createElement('li');
-    li.className = `check check-${c.state}`;
-    const icon = document.createElement('span');
-    icon.className = 'icon';
-    icon.textContent = ICON[c.state] || '?';
-    const body = document.createElement('div');
-    body.className = 'body';
-    const title = document.createElement('div');
-    title.className = 'title';
-    title.textContent = c.label;
-    const detail = document.createElement('div');
-    detail.className = 'detail small';
-    detail.textContent = c.detail;
-    body.appendChild(title);
-    body.appendChild(detail);
-    li.appendChild(icon);
-    li.appendChild(body);
-    checksEl.appendChild(li);
-  }
-  checkedAtEl.textContent = `Checked ${new Date(status.checkedAt).toLocaleTimeString()}`;
+  for (const c of status.checks) checksEl.appendChild(checkRow(c.state, c.label, c.detail));
+  const missing = status.checks.filter((c) => c.state === 'missing').length;
+  const warn = status.checks.filter((c) => c.state === 'warn').length;
+  if (missing) setMeta('setup-meta', `${missing} missing`, 'bad');
+  else if (warn) setMeta('setup-meta', `${warn} to check`, 'warn');
+  else setMeta('setup-meta', 'All ready', 'ok');
+  checkedAtEl.textContent = `Checked ${new Date(status.checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+function showChecking() {
+  checksEl.innerHTML = '<li class="check-empty">Checking…</li>';
+  setMeta('setup-meta', 'Checking…');
 }
 
 // ---------- usage meter ----------
@@ -90,62 +245,74 @@ function formatReset(epochSeconds) {
   if (!epochSeconds) return '';
   const d = new Date(epochSeconds * 1000);
   const mins = Math.round((d.getTime() - Date.now()) / 60000);
-  if (mins <= 0) return 'Resets now';
+  if (mins <= 0) return 'now';
   const when = mins < 24 * 60
     ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : d.toLocaleDateString([], { weekday: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const left = mins < 60 ? `${mins} min` : mins < 24 * 60 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${Math.floor(mins / 1440)} d ${Math.floor((mins % 1440) / 60)} h`;
-  return `Resets ${when} (in ${left})`;
+  return `${when} (in ${left})`;
 }
 
 function setMeter(prefix, window) {
   const pct = window ? Math.round(window.used * 100) : 0;
-  $(`${prefix}-text`).textContent = window ? `${pct}% used` : 'n/a';
+  $(`${prefix}-text`).textContent = window ? `${pct}%` : 'n/a';
   const fill = $(`${prefix}-fill`);
   fill.style.width = `${Math.min(100, pct)}%`;
-  fill.className = `meter-fill ${pct >= 90 ? 'meter-red' : pct >= 70 ? 'meter-amber' : 'meter-green'}`;
-  $(`${prefix}-reset`).textContent = window ? formatReset(window.resetsAt) : '';
+  fill.className = `bar-fill ${pct >= 90 ? 'bar-red' : pct >= 70 ? 'bar-amber' : 'bar-green'}`;
 }
 
 let lastUsage = null;
 
 function renderUsage(usage) {
   lastUsage = usage;
-  $('usage-empty').className = 'hidden';
-  $('usage-bars').className = '';
   setMeter('u5', usage.fiveHour);
   setMeter('u7', usage.sevenDay);
-  $('usage-updated').textContent = `Updated ${new Date(usage.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  const reset = usage.fiveHour && formatReset(usage.fiveHour.resetsAt);
+  $('usage-reset').textContent = reset ? `5-hour limit resets ${reset}` : '';
 }
 
 // ---------- chat ----------
-function addBubble(kind, text) {
-  if (messagesEl.firstElementChild && messagesEl.firstElementChild.className.indexOf('muted') >= 0 && !messagesEl.querySelector('.bubble')) {
-    messagesEl.innerHTML = '';
-  }
+function addMessage(kind, text) {
+  const empty = messagesEl.querySelector('.empty');
+  if (empty) messagesEl.removeChild(empty);
   const div = document.createElement('div');
-  div.className = `bubble bubble-${kind}`;
+  div.className = `msg msg-${kind}`;
   div.textContent = text;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
 }
 
+let usageWarnedFor = null; // the reset time of the window already warned about
+
 function sendPrompt() {
   const text = promptEl.value.trim();
   if (!text || busy || !online) return;
+  const five = lastUsage && lastUsage.fiveHour;
+  if (five && five.used >= USAGE_WARN && usageWarnedFor !== five.resetsAt) {
+    usageWarnedFor = five.resetsAt;
+    addMessage('note', `You've used ${Math.round(five.used * 100)}% of your 5-hour limit (resets ${formatReset(five.resetsAt)}). Long tasks may hit the limit. Press Send again to go ahead.`);
+    return;
+  }
   if (request('chat-send', { text })) {
     promptEl.value = '';
     setBusy(true);
-    activityEl.textContent = 'Claude is thinking…';
+    activityEl.textContent = 'Thinking…';
   }
 }
 
 function handleMessage(msg) {
+  for (const h of messageHooks) if (h(msg)) return;
   if (handleAutocut(msg)) return;
   switch (msg.type) {
     case 'hello':
       if (msg.busy) setBusy(true);
+      jobBusy = !!msg.jobBusy;
+      updateControls();
+      break;
+    case 'job-busy':
+      jobBusy = msg.busy;
+      updateControls();
       break;
     case 'status':
       renderChecks(msg);
@@ -154,41 +321,42 @@ function handleMessage(msg) {
       renderUsage(msg.usage);
       break;
     case 'chat-user':
-      addBubble('user', msg.text);
+      addMessage('user', msg.text);
       currentReply = null;
       setBusy(true);
       break;
     case 'chat-block':
-      // A new text block starts after tool use; keep one bubble per block.
+      // A new text block starts after tool use; keep one message per block.
       if (currentReply && currentReply.textContent) currentReply = null;
       break;
     case 'chat-delta':
-      if (!currentReply) currentReply = addBubble('assistant', '');
+      if (!currentReply) currentReply = addMessage('assistant', '');
       currentReply.textContent += msg.text;
       messagesEl.scrollTop = messagesEl.scrollHeight;
-      activityEl.textContent = 'Claude is replying…';
+      activityEl.textContent = 'Replying…';
       break;
     case 'chat-tool':
       activityEl.textContent = `Using ${msg.name}${msg.input ? ': ' + msg.input : ''}`;
       currentReply = null;
       break;
     case 'chat-done':
-      if (msg.isError) addBubble('error', msg.error || 'Claude reported an error.');
-      if (msg.denied && msg.denied.length) addBubble('note', `Blocked (needs approval, coming later): ${[...new Set(msg.denied)].join(', ')}`);
+      if (msg.isError) addMessage('error', msg.error || 'Claude reported an error.');
+      if (msg.denied && msg.denied.length) addMessage('note', `Blocked (needs approval, coming later): ${msg.denied.filter((d, i, a) => a.indexOf(d) === i).join(', ')}`);
       currentReply = null;
       setBusy(false);
       break;
     case 'chat-error':
-      addBubble('error', msg.error);
+      addMessage('error', msg.error);
       currentReply = null;
       setBusy(false);
       break;
     case 'chat-cleared':
-      messagesEl.innerHTML = '<div class="muted small">New conversation.</div>';
+      messagesEl.innerHTML = '<div class="empty">New conversation.</div>';
       currentReply = null;
       break;
     case 'error':
       console.error('Helper error:', msg.error);
+      if (msg.request === 'seek') setMeta('ac-meta', "Couldn't move the playhead", 'warn');
       break;
     default:
       break;
@@ -198,11 +366,22 @@ function handleMessage(msg) {
 // ---------- auto-cut ----------
 const acAnalyzeBtn = $('ac-analyze');
 const acApplyBtn = $('ac-apply');
+const acMarkersBtn = $('ac-markers');
+const acClearBtn = $('ac-clear-markers');
+const acRestoreBtn = $('ac-restore');
 let acBusy = false;
+let acCutCount = 0;
+let acAppliedRanges = []; // cuts already made, so review times can follow the shortened timeline
 
-function mmss(seconds) {
-  const s = Math.max(0, Math.round(seconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+// A time from the analysis, moved to where it sits after the applied cuts.
+function afterCuts(t) {
+  let shift = 0;
+  for (const [s, e] of acAppliedRanges) if (s < t) shift += Math.min(e, t) - s;
+  return Math.max(0, t - shift);
+}
+
+function seekTo(t) {
+  request('seek', { t: afterCuts(t) });
 }
 
 function acSettings() {
@@ -210,84 +389,131 @@ function acSettings() {
   return {
     pauseSeconds: Number($('ac-pause').value) || 0.5,
     thresholdDb: thr === '' ? 'auto' : Number(thr),
-    removeRetakes: $('ac-retakes').checked,
-    removeUms: $('ac-ums').checked,
+    removeRetakes: isOn('ac-retakes'),
+    removeUms: isOn('ac-ums'),
     slatePhrases: $('ac-slates').value.split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
 
 function acUpdateControls() {
-  acAnalyzeBtn.disabled = !online || acBusy;
-  acApplyBtn.disabled = !online || acBusy;
+  const blocked = !online || jobBusy;
+  setDisabled(acAnalyzeBtn, blocked);
+  setDisabled(acApplyBtn, blocked);
+  setDisabled(acMarkersBtn, blocked);
+  setDisabled(acClearBtn, blocked);
+  setDisabled(acRestoreBtn, blocked);
+  acAnalyzeBtn.textContent = acBusy ? 'Working…' : 'Analyze';
 }
 
-function listBlock(title, items) {
+// Rows of [time, text]; the time is clickable and moves the Premiere playhead there.
+function listBlock(title, rows, note) {
   const wrap = document.createElement('div');
-  wrap.className = 'listblock';
+  wrap.className = 'list';
   const h = document.createElement('div');
-  h.className = 'title small';
+  h.className = 'list-title';
   h.textContent = title;
   wrap.appendChild(h);
-  for (const text of items) {
-    const d = document.createElement('div');
-    d.className = 'detail small';
-    d.textContent = text;
-    wrap.appendChild(d);
+  if (note) {
+    const n = document.createElement('div');
+    n.className = 'hint list-note';
+    n.textContent = note;
+    wrap.appendChild(n);
+  }
+  for (const [time, text] of rows) {
+    const row = document.createElement('div');
+    row.className = 'list-row list-row-link';
+    const t = document.createElement('span');
+    t.className = 'list-time';
+    t.textContent = mmss(afterCuts(time));
+    const x = document.createElement('span');
+    x.className = 'list-text';
+    x.textContent = text;
+    row.appendChild(t);
+    row.appendChild(x);
+    row.addEventListener('click', () => { if (online && !jobBusy) seekTo(time); });
+    wrap.appendChild(row);
   }
   return wrap;
 }
 
+function chip(text) {
+  const c = document.createElement('span');
+  c.className = 'chip';
+  c.textContent = text;
+  return c;
+}
+
+let acReviewRows = null; // kept so the lists can be redrawn with post-cut times
+
+function renderReviewLists() {
+  const lists = $('ac-lists');
+  lists.innerHTML = '';
+  if (!acReviewRows) return;
+  if (acReviewRows.review.length) lists.appendChild(listBlock('Check after applying', acReviewRows.review, 'Click a time to jump there in Premiere.'));
+  if (acReviewRows.retakes.length) lists.appendChild(listBlock('Retakes removed', acReviewRows.retakes));
+}
+
+function setMarkersPlaced(placed) {
+  show($('ac-marker-note'), placed);
+  show(acClearBtn, placed);
+  acMarkersBtn.textContent = placed ? 'Markers placed' : 'Preview as markers';
+  acApplyBtn.textContent = placed ? 'Apply cuts with markers left' : `Apply ${acCutCount} cuts`;
+}
+
 function renderAnalysis(r) {
-  $('ac-results').className = '';
-  $('ac-done').className = 'hidden';
-  $('ac-seq').textContent = r.sequence.name;
+  acAppliedRanges = [];
+  show($('ac-results'), true);
+  show($('ac-done'), false);
+  show($('ac-after'), false);
+  setMeta('ac-meta', r.sequence.name);
   const st = r.stats;
-  $('ac-summary').textContent = st.cuts
-    ? `${st.cuts} cuts: ${mmss(st.before)} → ${mmss(st.after)} (saves ${mmss(st.removedSeconds)})`
+  acCutCount = st.cuts;
+  $('ac-count').textContent = String(st.cuts);
+  $('ac-durations').textContent = st.cuts
+    ? `${mmss(st.before)} to ${mmss(st.after)}, saves ${mmss(st.removedSeconds)}`
     : 'Nothing to cut with these settings.';
-  $('ac-breakdown').textContent = `${st.retakes} retakes · ${st.ums} ums/breaths · ${st.pauses} pauses · threshold ${r.threshold} dB`;
+
+  const chips = $('ac-chips');
+  chips.innerHTML = '';
+  chips.appendChild(chip(`${st.retakes} retakes`));
+  chips.appendChild(chip(`${st.ums} ums/breaths`));
+  chips.appendChild(chip(`${st.pauses} pauses`));
+  chips.appendChild(chip(`${r.threshold} dB`));
 
   const review = [];
-  for (const x of r.review.unconfidentRetakes) review.push(`${mmss(x.at)}  unsure retake: "${x.removedText}"`);
-  for (const x of r.review.longUnworded) review.push(`${mmss(x.at)}  ${x.seconds}s sound cut as an um (check it's not a word)`);
-  for (const x of r.review.repeats) review.push(`${mmss(x.at)}  possible repeat, not cut: "${x.text}"`);
-  const reviewEl = $('ac-review');
-  reviewEl.innerHTML = '';
-  if (review.length) reviewEl.appendChild(listBlock('Check after applying', review));
+  for (const x of r.review.unconfidentRetakes) review.push([x.at, `Unsure retake: "${x.removedText}"`]);
+  for (const x of r.review.longUnworded) review.push([x.at, `${x.seconds}s sound cut as an um, check it isn't a word`]);
+  for (const x of r.review.repeats) review.push([x.at, `Possible repeat, not cut: "${x.text}"`]);
+  review.sort((a, b) => a[0] - b[0]);
+  acReviewRows = { review, retakes: r.retakes.map((x) => [x.at, `"${x.removedText}"`]) };
+  renderReviewLists();
 
-  const rtEl = $('ac-retakes-list');
-  rtEl.innerHTML = '';
-  if (r.retakes.length) rtEl.appendChild(listBlock('Retakes to remove', r.retakes.map((x) => `${mmss(x.at)}  "${x.removedText}"`)));
-  acApplyBtn.className = st.cuts ? '' : 'hidden';
+  show($('ac-apply-area'), st.cuts > 0);
+  setMarkersPlaced(false);
 }
 
 function setAcProgress(label, done, total) {
+  show($('ac-working'), !!label);
   $('ac-progress').textContent = label || '';
-  const track = $('ac-bar-track');
-  if (total) {
-    track.className = 'meter-track';
-    $('ac-bar').style.width = `${Math.round((done / total) * 100)}%`;
-  } else {
-    track.className = 'meter-track hidden';
-  }
+  const bar = $('ac-bar');
+  show(bar.parentElement, !!total);
+  if (total) bar.style.width = `${Math.round((done / total) * 100)}%`;
 }
 
-acAnalyzeBtn.addEventListener('click', () => {
-  $('ac-results').className = 'hidden';
-  $('ac-done').className = 'hidden';
-  setAcProgress('Starting…');
-  request('autocut-analyze', { settings: acSettings() });
-});
-acApplyBtn.addEventListener('click', () => {
-  setAcProgress('Starting…', 0, 1);
-  request('autocut-apply');
-});
+function showAcNotice(text, isError) {
+  const el = $('ac-done');
+  el.className = `notice${isError ? ' notice-error' : ''}`;
+  el.style.display = '';
+  el.textContent = text;
+}
 
 function handleAutocut(msg) {
   switch (msg.type) {
     case 'autocut-busy':
       acBusy = msg.busy;
       acUpdateControls();
+      if (msg.busy) setMeta('ac-meta', 'Working…', 'busy');
+      else if ($('ac-meta').textContent === 'Working…') setMeta('ac-meta', 'Active sequence');
       if (!msg.busy && $('ac-progress').textContent === 'Starting…') setAcProgress('');
       return true;
     case 'autocut-progress':
@@ -297,27 +523,40 @@ function handleAutocut(msg) {
       setAcProgress('');
       renderAnalysis(msg.result);
       return true;
+    case 'autocut-markers':
+      setAcProgress('');
+      setMarkersPlaced(msg.placed);
+      return true;
     case 'autocut-applied': {
       const r = msg.result;
       setAcProgress('');
-      $('ac-results').className = 'hidden';
-      const done = $('ac-done');
-      done.className = 'bubble bubble-note';
-      done.textContent = `Done: ${r.applied} cuts applied. ${r.durationAfter ? `Now ${mmss(r.durationAfter)}. ` : ''}Backup: "${r.backup.name}".`;
+      show($('ac-results'), false);
+      acAppliedRanges = r.ranges || [];
+      renderReviewLists();
+      if (!r.applied) {
+        showAcNotice(r.skipped ? `No cuts made: all ${r.skipped} markers were removed.` : 'Nothing to cut.');
+        return true;
+      }
+      const kept = r.skipped ? ` ${r.skipped} kept because you removed their markers.` : '';
+      showAcNotice(`Done: ${r.applied} cuts applied.${kept} ${r.durationAfter ? `Now ${mmss(r.durationAfter)}. ` : ''}Backup: "${r.backup.name}".`);
+      show($('ac-after'), true);
+      setMeta('ac-meta', `${r.applied} cuts applied`, 'ok');
       return true;
     }
-    case 'autocut-error': {
+    case 'autocut-restored':
+      showAcNotice(`Opened the backup "${msg.backup.name}". The cut version is still in the project.`);
+      return true;
+    case 'autocut-error':
       setAcProgress('');
-      const done = $('ac-done');
-      done.className = 'bubble bubble-error';
-      done.textContent = msg.error;
+      showAcNotice(msg.error, true);
+      setMeta('ac-meta', 'Error', 'bad');
       return true;
-    }
     default:
       return false;
   }
 }
 
+// ---------- wiring ----------
 function connect() {
   try {
     ws = new WebSocket(HELPER_URL);
@@ -328,13 +567,14 @@ function connect() {
   }
   ws.onopen = () => {
     setConnection(true);
-    checksEl.innerHTML = '<li class="muted">Checking…</li>';
+    showChecking();
     request('status');
+    for (const h of connectHooks) h();
   };
   ws.onmessage = (event) => {
     let msg;
-    try { msg = JSON.parse(event.data); } catch { return; }
-    handleMessage(msg);
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    try { handleMessage(msg); } catch (e) { showFatal(e.message); }
   };
   ws.onclose = () => {
     setConnection(false);
@@ -343,21 +583,76 @@ function connect() {
   ws.onerror = () => { /* onclose follows and handles the retry */ };
 }
 
-refreshBtn.addEventListener('click', () => {
-  checksEl.innerHTML = '<li class="muted">Checking…</li>';
-  request('status');
-});
-sendBtn.addEventListener('click', sendPrompt);
-stopBtn.addEventListener('click', () => request('chat-stop'));
-newChatBtn.addEventListener('click', () => request('chat-new'));
-promptEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendPrompt();
-  }
-});
-// Keep the reset countdowns current.
-setInterval(() => { if (lastUsage) renderUsage(lastUsage); }, 60000);
+// Switch rows flip on click; their state is read with isOn().
+function wireSwitches() {
+  each('.switch-row', (row) => {
+    setSwitch(row, hasClass(row, 'on'));
+    row.addEventListener('click', () => setSwitch(row, !hasClass(row, 'on')));
+  });
+}
 
-setConnection(false);
-connect();
+function wire() {
+  initPanels();
+  wireSwitches();
+
+  $('ac-more-toggle').addEventListener('click', () => {
+    const more = $('ac-more');
+    const opening = hasClass(more, 'hidden');
+    show(more, opening);
+    $('ac-more-toggle').firstElementChild.textContent = opening ? '▾' : '▸';
+  });
+
+  onClick(acAnalyzeBtn, () => {
+    show($('ac-results'), false);
+    show($('ac-done'), false);
+    show($('ac-after'), false);
+    setAcProgress('Starting…');
+    request('autocut-analyze', { settings: acSettings() });
+  });
+  onClick(acMarkersBtn, () => {
+    setAcProgress('Placing markers…');
+    request('autocut-markers');
+  });
+  onClick(acClearBtn, () => request('autocut-clear-markers'));
+  onClick(acApplyBtn, () => {
+    setAcProgress('Starting…', 0, 1);
+    request('autocut-apply');
+  });
+  onClick(acRestoreBtn, () => request('autocut-restore'));
+
+  onClick(refreshBtn, () => {
+    showChecking();
+    request('status');
+  });
+  onClick($('start-helper'), () => startHelper().catch((e) => showFatal(e.message)));
+  onClick(sendBtn, sendPrompt);
+  onClick(stopBtn, () => request('chat-stop'));
+  // The New button sits in the Chat header; don't let its click collapse the section.
+  newChatBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!hasClass(newChatBtn, 'is-disabled')) request('chat-new');
+  });
+  promptEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendPrompt();
+    }
+  });
+  if (!IN_UXP) {
+    // Focus ring goes on the wrapping box (the composer or a .field-box).
+    each('.input', (input) => {
+      input.addEventListener('focus', () => setClass(input.parentElement, 'focused', true));
+      input.addEventListener('blur', () => setClass(input.parentElement, 'focused', false));
+    });
+  }
+  // Keep the reset countdown current.
+  setInterval(() => { if (lastUsage) renderUsage(lastUsage); }, 60000);
+}
+
+try {
+  wire();
+  setConnection(false);
+} catch (e) {
+  showFatal(e.message);
+}
+// connect() is called at the end of features.js, once its message hooks are registered.

@@ -1,180 +1,653 @@
+/* Editing Assistant panel. Flat dark greys to sit inside Premiere, one blue accent.
+   UXP: flexbox only (no grid), colours hardcoded, buttons are divs so they style the same everywhere. */
+
 html, body {
   height: 100%;
   margin: 0;
   padding: 0;
-}
-body {
-  font-family: sans-serif;
-  font-size: 13px;
-  color: #e6e6e6;
-  background-color: #232323;
   overflow: hidden;
+  background-color: #1e1e1e;
 }
 
-/* The whole panel scrolls inside #app, at any docked height. */
+body {
+  font-family: "Adobe Clean", "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: #e8e8e8;
+}
+
 #app {
   height: 100vh;
   overflow-y: auto;
-  overflow-x: hidden;
-  padding: 10px;
+  padding: 10px 10px 16px 10px;
   box-sizing: border-box;
 }
 
-header {
+.hidden { display: none !important; }
+
+/* ---------- top bar ---------- */
+.topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 10px 2px;
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f2f2f2;
+}
+
+.status {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  margin-right: 6px;
+  background-color: #6a6a6a;
+}
+.dot-on { background-color: #3fae6a; }
+.dot-off { background-color: #e5554f; }
+.dot-busy { background-color: #2680eb; }
+.dot-warn { background-color: #e2a23b; }
+
+/* ---------- usage strip ---------- */
+.usage {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
+  margin: 0 -6px;
 }
-header h2 { margin-right: 8px; }
 
-h2 { font-size: 16px; margin: 0; }
-h3 { font-size: 13px; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 1px; color: #b0b0b0; }
+.usage-item {
+  flex: 1 1 120px;
+  margin: 0 6px 6px 6px;
+}
 
-section {
-  background-color: #2c2c2c;
+.usage-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.usage-label { color: #9a9a9a; }
+.usage-value { color: #d0d0d0; }
+
+.usage-reset {
+  font-size: 10px;
+  color: #7a7a7a;
+  margin: 0 0 12px 0;
+}
+
+.bar {
+  height: 4px;
+  border-radius: 2px;
+  background-color: #333333;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 4px;
+  width: 0%;
+  background-color: #3fae6a;
+}
+.bar-green { background-color: #3fae6a; }
+.bar-amber { background-color: #e2a23b; }
+.bar-red { background-color: #e5554f; }
+.bar-accent { background-color: #2680eb; }
+
+/* ---------- collapsible panels ---------- */
+.panel {
+  background-color: #262626;
+  border: 1px solid #333333;
   border-radius: 6px;
-  padding: 10px;
-  margin-bottom: 10px;
-  box-sizing: border-box;
-  width: 100%;
+  margin-bottom: 8px;
 }
 
-.section-head {
+.panel-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+.panel-head:hover { background-color: #2b2b2b; }
+.panel-head-open { border-bottom: 1px solid #333333; }
+
+.chevron {
+  width: 12px;
+  font-size: 10px;
+  color: #8a8a8a;
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f0f0f0;
+  margin-left: 4px;
+}
+
+.panel-meta {
+  flex: 1 1 auto;
+  margin-left: 10px;
+  font-size: 11px;
+  color: #8a8a8a;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.meta-ok { color: #3fae6a; }
+.meta-warn { color: #e2a23b; }
+.meta-bad { color: #e5554f; }
+.meta-busy { color: #5a9ff0; }
+
+.panel-head .btn { margin-left: 8px; }
+
+.panel-body {
+  display: none;
+  padding: 12px 10px;
+}
+
+/* ---------- form fields ---------- */
+.field { margin-bottom: 12px; }
+
+.label {
+  display: block;
+  font-size: 11px;
+  color: #b4b4b4;
+  margin-bottom: 5px;
+}
+
+.hint {
+  font-size: 10px;
+  color: #7f7f7f;
+  margin-top: 4px;
+}
+.center { text-align: center; }
+
+/* In Premiere, inputs are native controls that clip when given padding, borders or a
+   fixed height. The box look lives on .field-box; the input itself stays bare. */
+.field-box {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  background-color: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+}
+.field-box.focused { border-color: #2680eb; }
+
+.input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background-color: #1a1a1a;
+  color: #ececec;
+  font-size: 12px;
+  font-family: "Adobe Clean", "Segoe UI", sans-serif;
+}
+
+.input-suffix {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: 140px;
+}
+.input-suffix .field-box { flex: 1 1 auto; min-width: 0; }
+.suffix {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+/* ---------- switches ---------- */
+.switch-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid #303030;
+  cursor: pointer;
+}
+.switch-row .hint { margin-top: 2px; }
+
+.switch-text { flex: 1 1 auto; margin-right: 10px; }
+.switch-title { font-size: 12px; color: #e0e0e0; }
+
+.switch {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: #444444;
+  box-sizing: border-box;
+  padding: 2px;
+}
+.knob {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background-color: #bdbdbd;
+}
+.switch.switch-on { background-color: #2680eb; }
+.knob.knob-on { margin-left: 12px; background-color: #ffffff; }
+
+.disclosure {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid #303030;
+  font-size: 11px;
+  color: #a8a8a8;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.disclosure:hover { color: #e0e0e0; }
+.small-chevron { width: 12px; }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.btn-primary { background-color: #2680eb; color: #ffffff; }
+.btn-primary:hover { background-color: #378ef0; }
+.btn-primary:active { background-color: #1473e6; }
+
+.btn-secondary { background-color: #333333; color: #e0e0e0; border-color: #444444; }
+.btn-secondary:hover { background-color: #3b3b3b; }
+
+.btn-ghost { color: #a8a8a8; font-weight: 400; }
+.btn-ghost:hover { color: #ffffff; background-color: #333333; }
+
+.btn-small { height: 24px; padding: 0 10px; font-size: 11px; }
+.btn-block { width: 100%; }
+
+.btn.is-disabled,
+.btn.is-disabled:hover {
+  background-color: #2e2e2e;
+  color: #6a6a6a;
+  border-color: #2e2e2e;
+  cursor: default;
+}
+.btn-ghost.is-disabled,
+.btn-ghost.is-disabled:hover { background-color: transparent; border-color: transparent; }
+
+.actions { margin-top: 12px; }
+
+/* ---------- auto-cut progress and results ---------- */
+.working { margin-top: 12px; }
+.working-text { font-size: 11px; color: #b4b4b4; margin-bottom: 6px; }
+
+.result {
+  margin-top: 12px;
+  background-color: #1e1e1e;
+  border: 1px solid #333333;
+  border-radius: 5px;
+  padding: 12px;
+}
+
+.result-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.result-number {
+  font-size: 26px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-right: 10px;
+}
+.result-label { font-size: 12px; color: #d8d8d8; }
+.result-detail { font-size: 11px; color: #8a8a8a; margin-top: 2px; }
+
+.chips {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
+  margin: 10px -3px 0 -3px;
 }
-.section-head h3 { margin-right: 8px; }
+.chip {
+  margin: 3px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background-color: #2e2e2e;
+  border: 1px solid #3a3a3a;
+  font-size: 10px;
+  color: #c4c4c4;
+}
 
-/* Long paths, names and replies wrap instead of widening the panel. */
-.detail, .bubble, .summary, #ac-seq, #activity, #ac-progress { overflow-wrap: break-word; word-break: break-word; }
+.list { margin-top: 12px; }
+.list-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #9a9a9a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.list-row {
+  display: flex;
+  flex-direction: row;
+  padding: 4px 0;
+  border-top: 1px solid #2c2c2c;
+  font-size: 11px;
+}
+.list-time {
+  flex: 0 0 38px;
+  color: #5a9ff0;
+}
+.list-text {
+  flex: 1 1 auto;
+  color: #c8c8c8;
+}
 
-ul { list-style-type: none; margin: 0; padding: 0; }
+.notice {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  background-color: #1f2a22;
+  border: 1px solid #2f4a37;
+  color: #cfe8d6;
+}
+.notice-error {
+  background-color: #2d1f1f;
+  border-color: #5a2f2e;
+  color: #f2cfcd;
+}
+
+/* ---------- chat ---------- */
+.messages {
+  min-height: 40px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+
+.empty {
+  font-size: 11px;
+  color: #7f7f7f;
+  line-height: 16px;
+  padding: 8px 2px;
+}
+
+.msg {
+  margin-bottom: 8px;
+  line-height: 17px;
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+.msg-user {
+  margin-left: 30px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background-color: #2f3b4a;
+  color: #eef3f9;
+}
+.msg-assistant {
+  padding: 2px;
+  color: #e4e4e4;
+}
+.msg-note {
+  padding: 6px 8px;
+  border-left: 2px solid #e2a23b;
+  color: #d6c39d;
+  font-size: 11px;
+}
+.msg-error {
+  padding: 6px 8px;
+  border-left: 2px solid #e5554f;
+  color: #f0bdbb;
+  font-size: 11px;
+}
+
+.activity {
+  min-height: 14px;
+  font-size: 10px;
+  color: #5a9ff0;
+  margin: 2px 0 6px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer {
+  background-color: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  padding: 8px 8px 0 8px;
+}
+.composer.focused { border-color: #2680eb; }
+
+.composer-input {
+  display: block;
+  height: 48px;
+  resize: none;
+}
+
+.composer-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 0 8px 0;
+}
+.composer-row .hint {
+  flex: 1 1 auto;
+  margin: 0 8px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-row .btn { margin-left: 6px; }
+
+/* ---------- setup ---------- */
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 
 .check {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
-  padding: 6px 0;
-  border-bottom: 1px solid #383838;
+  padding: 8px 0;
+  border-top: 1px solid #303030;
 }
-.check:last-child { border-bottom: none; }
+.check:first-child { border-top: none; padding-top: 0; }
 
-.icon {
-  width: 20px;
-  font-weight: bold;
-  font-size: 14px;
-}
-.check-ok .icon { color: #5fbf6a; }
-.check-warn .icon { color: #e0b440; }
-.check-missing .icon { color: #e05a5a; }
-
-.body { flex: 1; }
-.title { font-weight: bold; }
-.detail { color: #a8a8a8; margin-top: 2px; }
-
-.pill {
+.check .dot { margin-top: 5px; margin-right: 10px; flex: 0 0 auto; }
+.check-body { flex: 1 1 auto; }
+.check-title { font-size: 12px; color: #e8e8e8; }
+.check-detail {
   font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  color: #8a8a8a;
+  margin-top: 2px;
+  line-height: 15px;
+  word-break: break-word;
 }
-.pill-on { background-color: #2f5f37; color: #c9f0cf; }
-.pill-off { background-color: #5f2f2f; color: #f0c9c9; }
+.check-empty { font-size: 11px; color: #8a8a8a; }
 
-button { margin-left: 6px; margin-top: 4px; }
-.hidden { display: none; }
-.row {
+.setup-foot {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
-  margin-top: 6px;
-}
-
-/* usage meter */
-.meter { margin-top: 8px; }
-.meter-label {
-  display: flex;
-  flex-direction: row;
   justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 3px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #303030;
 }
-.meter-track {
-  height: 6px;
-  background-color: #3a3a3a;
-  border-radius: 3px;
-}
-.meter-fill {
-  height: 6px;
-  border-radius: 3px;
-}
-.meter-green { background-color: #5fbf6a; }
-.meter-amber { background-color: #e0b440; }
-.meter-red { background-color: #e05a5a; }
+.setup-foot .hint { margin-top: 0; }
 
-/* chat */
-#messages {
-  max-height: 45vh;
-  overflow-y: auto;
-  margin: 6px 0;
+/* Running inside Premiere: native inputs draw their own outline, so the wrappers go bare. */
+.field-box.native-ui {
+  height: auto;
+  padding: 0;
+  border: none;
+  background-color: transparent;
 }
-.bubble {
-  padding: 6px 8px;
-  border-radius: 6px;
-  margin: 4px 0;
-  white-space: pre-wrap;
-  font-size: 12px;
-  line-height: 1.4;
+.composer.native-ui {
+  padding: 0;
+  border: none;
+  background-color: transparent;
 }
-.bubble-user { background-color: #2f4a6b; margin-left: 24px; }
-.bubble-assistant { background-color: #383838; margin-right: 12px; }
-.bubble-error { background-color: #5f2f2f; color: #f0c9c9; }
-.bubble-note { background-color: #4d4325; color: #f0e2b5; font-size: 11px; }
-#activity { min-height: 14px; margin-bottom: 4px; }
-#prompt {
-  width: 100%;
-  min-height: 56px;
-  font-size: 12px;
-  box-sizing: border-box;
-}
+.sp-input { width: 100%; }
+.sp-area { width: 100%; height: 64px; }
 
-/* auto-cut: the two number fields sit side by side when there is room, stacked when narrow */
-.field-grid {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  margin: 0 -4px;
-}
-.field-grid .field {
-  flex: 1;
-  min-width: 130px;
-  padding: 0 4px;
-  box-sizing: border-box;
-}
-.field { margin-top: 6px; }
-.field label { display: block; font-size: 11px; color: #b0b0b0; margin-bottom: 2px; }
-.field input { width: 100%; font-size: 12px; box-sizing: border-box; }
-.field-row {
+/* ---------- shared bits for the newer sections ---------- */
+.btn-row {
   display: flex;
   flex-direction: row;
   align-items: center;
-  margin-top: 6px;
-  font-size: 12px;
+  margin-top: 10px;
 }
-.field-row label { margin-left: 4px; }
-.summary { font-weight: bold; margin-top: 8px; }
-.listblock { margin-top: 8px; max-height: 30vh; overflow-y: auto; }
-.grow { flex: 1; min-width: 140px; align-self: center; }
-#ac-bar-track { margin-top: 4px; }
-#ac-done { margin-top: 8px; }
+.btn-row .btn { margin-left: 8px; }
+.btn-row .btn:first-child { margin-left: 0; }
+.grow { flex: 1 1 auto; }
 
-.muted { color: #8a8a8a; }
-.small { font-size: 11px; }
-.placeholder { opacity: 0.6; }
+.divider {
+  height: 1px;
+  background-color: #303030;
+  margin: 14px 0;
+}
+
+.notice-info {
+  background-color: #1f2633;
+  border-color: #2c3d57;
+  color: #cddcf0;
+}
+
+.list-row-link { cursor: pointer; }
+.list-row-link:hover { background-color: #2a2a2a; }
+.list-note { margin: 0 0 4px 0; }
+
+/* ---------- client picker and guide ---------- */
+.select {
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  background-color: #1a1a1a;
+  color: #ececec;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-family: "Adobe Clean", "Segoe UI", sans-serif;
+  margin-bottom: 8px;
+}
+.select.native-ui {
+  height: auto;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+}
+
+.guide {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 2px 4px 2px 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: #cfcfcf;
+}
+.md-h {
+  font-size: 10px;
+  font-weight: 700;
+  color: #9a9a9a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 12px 0 4px 0;
+}
+.md-p { margin: 0 0 6px 0; }
+.md-note { color: #7f7f7f; }
+.md-li {
+  display: flex;
+  flex-direction: row;
+  margin: 0 0 4px 0;
+}
+.md-li-2 { margin-left: 14px; }
+.md-bullet {
+  flex: 0 0 12px;
+  color: #6f6f6f;
+}
+.md-li-text { flex: 1 1 auto; }
+.md-bold { font-weight: 700; color: #f0f0f0; }
+.md-code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 10px;
+  color: #d8c8a8;
+}
+.md-link { color: #5a9ff0; }
+.md-dim { color: #8a8a8a; }
+
+/* ---------- review ---------- */
+.qa-checks { margin-top: 12px; }
+.qa-checks .list-row { border-top: none; padding: 2px 0; }
+
+.tick-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 5px 0;
+  border-top: 1px solid #2c2c2c;
+  cursor: pointer;
+}
+.tick {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 1px solid #555555;
+  border-radius: 3px;
+  margin: 1px 8px 0 0;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  color: #ffffff;
+}
+.tick.tick-on { background-color: #2680eb; border-color: #2680eb; }
+.tick-text { flex: 1 1 auto; font-size: 11px; line-height: 16px; color: #d0d0d0; }
+.tick-text.tick-text-done { color: #7a7a7a; }
+
+.handoff-box { margin-top: 10px; padding-bottom: 8px; }
+.handoff-text {
+  display: block;
+  height: 150px;
+  resize: none;
+  font-size: 11px;
+  line-height: 16px;
+}
+.sp-area.handoff-text { height: 150px; }

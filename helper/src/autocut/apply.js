@@ -1,6 +1,7 @@
 // Applies a cut plan in Premiere: backup sequence first, then ripple-delete in batches of 50,
 // working from the end of the timeline backwards so earlier cut times never shift.
 import { call, PremiereError } from '../premiere.js';
+import { clearCutMarkers, keepMarked, listCutMarkers } from './markers.js';
 
 const BATCH = 50;
 
@@ -19,8 +20,8 @@ async function backupSequence(seq) {
 
 export async function applyCuts(analysis, onProgress = () => {}) {
   const seq = analysis.sequence;
-  const cuts = analysis.cuts;
-  if (!cuts.length) return { applied: 0 };
+  let cuts = analysis.cuts;
+  if (!cuts.length) return { applied: 0, skipped: 0, ranges: [] };
 
   // Refuse if the timeline changed since the analysis (cut times would land in the wrong places).
   const state = await call('get_premiere_state');
@@ -28,6 +29,19 @@ export async function applyCuts(analysis, onProgress = () => {}) {
   if (!live) throw new Error(`Sequence "${seq.name}" is no longer in the project.`);
   if (Math.abs(live.duration - seq.duration) > 0.05) throw new Error('The sequence changed since it was analysed. Run Analyze again.');
   await call('set_active_sequence', { sequence_id: seq.id });
+
+  // With a marker preview on the timeline, only cut what still has its marker, then clear the
+  // markers (sequence markers don't move with a ripple delete, so they'd end up in the wrong places).
+  let skipped = 0;
+  if (analysis.markersPlaced) {
+    onProgress({ phase: 'markers', label: 'Reading the cut markers', done: 0, total: cuts.length });
+    const markers = await listCutMarkers(seq.id);
+    const kept = keepMarked(cuts, markers, seq.fps);
+    skipped = cuts.length - kept.length;
+    cuts = kept;
+    await clearCutMarkers(seq.id);
+    if (!cuts.length) return { applied: 0, skipped, ranges: [] };
+  }
 
   onProgress({ phase: 'backup', label: 'Backing up the sequence', done: 0, total: cuts.length });
   const backup = await backupSequence(seq);
@@ -50,5 +64,7 @@ export async function applyCuts(analysis, onProgress = () => {}) {
 
   const after = await call('get_premiere_state');
   const final = (after.sequences || []).find((s) => s.id === seq.id);
-  return { applied: done, backup, durationBefore: seq.duration, durationAfter: final ? final.duration : null, expectedAfter: analysis.stats.after };
+  const removed = cuts.reduce((t, c) => t + c.end - c.start, 0);
+  return { applied: done, skipped, backup, durationBefore: seq.duration, durationAfter: final ? final.duration : null,
+    expectedAfter: +(seq.duration - removed).toFixed(2), ranges: cuts.map((c) => [c.start, c.end]) };
 }
