@@ -1,5 +1,5 @@
 // Editing Assistant panel: talks to the local helper for auto-cut, the Claude Code chat,
-// the setup checklist and the plan usage meter. Clients, captions and review live in features.js.
+// the setup checklist and the plan usage meter. Clients and review live in features.js.
 // UXP's DOM is partial: stick to className, getAttribute and plain loops (no dataset,
 // classList.toggle(force), NodeList spreading or Element.remove()).
 const HELPER_URL = 'ws://127.0.0.1:7790/panel';
@@ -27,10 +27,10 @@ window.addEventListener('error', (e) => showFatal(e.message || String(e.error)))
 
 // ---------- small UI helpers ----------
 function hasClass(el, name) {
-  return (' ' + el.className + ' ').indexOf(' ' + name + ' ') >= 0;
+  return (' ' + (el.className || '') + ' ').indexOf(' ' + name + ' ') >= 0;
 }
 function setClass(el, name, on) {
-  const parts = el.className.split(' ').filter((c) => c && c !== name);
+  const parts = String(el.className || '').split(' ').filter((c) => c && c !== name);
   if (on) parts.push(name);
   el.className = parts.join(' ');
 }
@@ -58,6 +58,18 @@ function setSwitch(row, on) {
   setClass(row, 'on', on);
   setClass(row.querySelector('.switch'), 'switch-on', on);
   setClass(row.querySelector('.knob'), 'knob-on', on);
+}
+// Spectrum fields in Premiere can report null until edited, so reads fall back to the
+// starting value and writes set both the property and the attribute.
+function getValue(id) {
+  const el = $(id);
+  const v = el.value;
+  return v === null || v === undefined ? (el.getAttribute('value') || '') : String(v);
+}
+function setValue(id, value) {
+  const el = $(id);
+  el.value = value;
+  el.setAttribute('value', value);
 }
 function isOn(id) {
   return hasClass($(id), 'on');
@@ -91,8 +103,8 @@ function useSpectrumFields() {
     field.id = old.id;
     field.className = isArea ? `sp-input sp-area ${old.className.replace(/\binput\b/, '')}` : 'sp-input';
     if (old.getAttribute('placeholder')) field.setAttribute('placeholder', old.getAttribute('placeholder'));
-    if (old.value) field.setAttribute('value', old.value);
     old.parentElement.replaceChild(field, old);
+    if (old.value) { field.setAttribute('value', old.value); field.value = old.value; }
   });
   each('.field-box, .composer, .select', (box) => setClass(box, 'native-ui', true));
 }
@@ -114,7 +126,7 @@ let ws = null;
 let nextId = 1;
 let online = false;
 let busy = false;           // chat is answering
-let jobBusy = false;        // a Premiere job (auto-cut, captions, QA) is running in the helper
+let jobBusy = false;        // a Premiere job (auto-cut, QA) is running in the helper
 let currentReply = null;    // the assistant message being streamed into
 const messageHooks = [];    // features.js handlers: return true when a message was theirs
 const controlHooks = [];    // features.js: refresh enabled/disabled state
@@ -286,7 +298,7 @@ function addMessage(kind, text) {
 let usageWarnedFor = null; // the reset time of the window already warned about
 
 function sendPrompt() {
-  const text = promptEl.value.trim();
+  const text = getValue('prompt').trim();
   if (!text || busy || !online) return;
   const five = lastUsage && lastUsage.fiveHour;
   if (five && five.used >= USAGE_WARN && usageWarnedFor !== five.resetsAt) {
@@ -295,13 +307,38 @@ function sendPrompt() {
     return;
   }
   if (request('chat-send', { text })) {
-    promptEl.value = '';
+    setValue('prompt', '');
     setBusy(true);
     activityEl.textContent = 'Thinking…';
   }
 }
 
+// ---------- Premiere safety check ----------
+let recoveryInfo = null;
+
+function showRecovery(text, canContinue) {
+  show($('recovery'), true);
+  $('recovery-text').textContent = text;
+  show($('recovery-ack'), canContinue);
+  show($('recovery-check'), !canContinue);
+}
+
+function handleRecovery(msg) {
+  if (msg.type !== 'recovery') return false;
+  if (msg.cleared || !msg.required) {
+    recoveryInfo = null;
+    show($('recovery'), false);
+    if (msg.cleared) showAcNotice('Safety check done. Premiere accepts edits again; try the last step again.');
+    return true;
+  }
+  recoveryInfo = msg;
+  showRecovery(`${msg.reason} Premiere's active sequence has ${msg.clipCount} clip${msg.clipCount === 1 ? '' : 's'} in the checked range. If the timeline looks right, press Continue.`, true);
+  return true;
+}
+
 function handleMessage(msg) {
+  if (handleRecovery(msg)) return;
+  if (msg.recovery && /-error$/.test(msg.type)) showRecovery('Premiere wants a safety check before more edits.', false);
   for (const h of messageHooks) if (h(msg)) return;
   if (handleAutocut(msg)) return;
   switch (msg.type) {
@@ -368,7 +405,8 @@ const acAnalyzeBtn = $('ac-analyze');
 const acApplyBtn = $('ac-apply');
 const acMarkersBtn = $('ac-markers');
 const acClearBtn = $('ac-clear-markers');
-const acRestoreBtn = $('ac-restore');
+const acUndoBtn = $('ac-undo');
+const acStopBtn = $('ac-stop');
 let acBusy = false;
 let acCutCount = 0;
 let acAppliedRanges = []; // cuts already made, so review times can follow the shortened timeline
@@ -385,13 +423,13 @@ function seekTo(t) {
 }
 
 function acSettings() {
-  const thr = $('ac-threshold').value.trim();
+  const thr = getValue('ac-threshold').trim();
   return {
-    pauseSeconds: Number($('ac-pause').value) || 0.5,
+    pauseSeconds: Number(getValue('ac-pause')) || 0.5,
     thresholdDb: thr === '' ? 'auto' : Number(thr),
     removeRetakes: isOn('ac-retakes'),
     removeUms: isOn('ac-ums'),
-    slatePhrases: $('ac-slates').value.split(',').map((s) => s.trim()).filter(Boolean),
+    slatePhrases: getValue('ac-slates').split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
 
@@ -401,7 +439,8 @@ function acUpdateControls() {
   setDisabled(acApplyBtn, blocked);
   setDisabled(acMarkersBtn, blocked);
   setDisabled(acClearBtn, blocked);
-  setDisabled(acRestoreBtn, blocked);
+  setDisabled(acUndoBtn, blocked);
+  show(acStopBtn, acBusy);
   acAnalyzeBtn.textContent = acBusy ? 'Working…' : 'Analyze';
 }
 
@@ -511,6 +550,7 @@ function handleAutocut(msg) {
   switch (msg.type) {
     case 'autocut-busy':
       acBusy = msg.busy;
+      setDisabled(acStopBtn, false);
       acUpdateControls();
       if (msg.busy) setMeta('ac-meta', 'Working…', 'busy');
       else if ($('ac-meta').textContent === 'Working…') setMeta('ac-meta', 'Active sequence');
@@ -533,6 +573,12 @@ function handleAutocut(msg) {
       show($('ac-results'), false);
       acAppliedRanges = r.ranges || [];
       renderReviewLists();
+      if (r.stopped) {
+        showAcNotice(`Stopped after ${r.applied} cuts${r.durationAfter ? `, now ${mmss(r.durationAfter)}` : ''}. Undo cuts puts the sequence back to how it was.`);
+        show($('ac-after'), true);
+        setMeta('ac-meta', 'Stopped', 'warn');
+        return true;
+      }
       if (!r.applied) {
         showAcNotice(r.skipped ? `No cuts made: all ${r.skipped} markers were removed.` : 'Nothing to cut.');
         return true;
@@ -543,9 +589,21 @@ function handleAutocut(msg) {
       setMeta('ac-meta', `${r.applied} cuts applied`, 'ok');
       return true;
     }
-    case 'autocut-restored':
-      showAcNotice(`Opened the backup "${msg.backup.name}". The cut version is still in the project.`);
+    case 'autocut-stopped':
+      setAcProgress('');
+      showAcNotice(msg.kind === 'placing cut markers' ? 'Stopped. Some markers may already be on the timeline; Clear markers removes them.' : 'Stopped. Nothing on the timeline was changed.');
+      setMeta('ac-meta', 'Stopped', 'warn');
       return true;
+    case 'autocut-undone': {
+      const r = msg.result;
+      acAppliedRanges = [];
+      acReviewRows = null;
+      renderReviewLists();
+      show($('ac-after'), false);
+      showAcNotice(`Undone: "${r.restored}" is back to how it was before Apply.${r.keptAs ? ` The cut version is kept as "${r.keptAs}".` : ''}`);
+      setMeta('ac-meta', 'Cuts undone', 'ok');
+      return true;
+    }
     case 'autocut-error':
       setAcProgress('');
       showAcNotice(msg.error, true);
@@ -618,8 +676,16 @@ function wire() {
     setAcProgress('Starting…', 0, 1);
     request('autocut-apply');
   });
-  onClick(acRestoreBtn, () => request('autocut-restore'));
+  onClick(acUndoBtn, () => request('autocut-undo'));
+  onClick(acStopBtn, () => {
+    setDisabled(acStopBtn, true);
+    request('autocut-stop');
+  });
 
+  onClick($('recovery-check'), () => request('recovery-check'));
+  onClick($('recovery-ack'), () => {
+    if (recoveryInfo) request('recovery-ack', { recoveryRevision: recoveryInfo.recoveryRevision, hostStateRevision: recoveryInfo.hostStateRevision });
+  });
   onClick(refreshBtn, () => {
     showChecking();
     request('status');

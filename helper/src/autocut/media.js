@@ -11,11 +11,25 @@ const CACHE_DIR = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 
 // Nudges whisper to keep disfluencies; it still drops most "um"s, which the plan finds from the audio.
 const WHISPER_PROMPT = 'Um, so, uh, I mean, like, you know, uh, I- I think we, um, we should start.';
 
-function run(cmd, args, timeoutMs) {
+// signal: an AbortSignal; Stop kills ffmpeg/whisper mid-run.
+function run(cmd, args, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) =>
-      err ? reject(new Error(`${path.basename(cmd)} failed: ${String(stderr || err.message).trim().split('\n').pop()}`)) : resolve(stdout));
+    execFile(cmd, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, signal }, (err, stdout, stderr) => {
+      if (err && err.name === 'AbortError') return reject(stopped());
+      if (err) return reject(new Error(`${path.basename(cmd)} failed: ${String(stderr || err.message).trim().split('\n').pop()}`));
+      resolve(stdout);
+    });
   });
+}
+
+// Thrown when the editor presses Stop; the server reports it as stopped, not as an error.
+export function stopped() {
+  const e = new Error('Stopped.');
+  e.stopped = true;
+  return e;
+}
+export function checkStop(signal) {
+  if (signal && signal.aborted) throw stopped();
 }
 
 function cacheKey(mediaPath) {
@@ -24,10 +38,10 @@ function cacheKey(mediaPath) {
 }
 
 // 16 kHz mono WAV of the whole source, reused while the file is unchanged.
-async function extractWav(mediaPath, key) {
+async function extractWav(mediaPath, key, signal) {
   const wav = path.join(CACHE_DIR, `${key}.wav`);
   if (!fs.existsSync(wav)) {
-    await run('ffmpeg', ['-v', 'error', '-y', '-i', mediaPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], 30 * 60 * 1000);
+    await run('ffmpeg', ['-v', 'error', '-y', '-i', mediaPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], 30 * 60 * 1000, signal);
   }
   return wav;
 }
@@ -49,14 +63,14 @@ function loudnessFrames(wav) {
 }
 
 // Words with a DTW time (seconds into the source). DTW needs flash attention off (-nfa).
-async function transcribe(wav, key) {
+async function transcribe(wav, key, signal) {
   const out = path.join(CACHE_DIR, `${key}.words.json`);
   if (fs.existsSync(out)) return JSON.parse(fs.readFileSync(out, 'utf8'));
   const exe = findWhisper();
   if (!exe) throw new Error('whisper.cpp is not installed (see the setup checklist).');
   const base = path.join(CACHE_DIR, `${key}.whisper`);
   await run(exe, ['-m', whisperModelPath(), '-f', wav, '-t', String(Math.max(2, os.cpus().length - 2)), '-nfa', '--dtw', 'small.en',
-    '-ojf', '-of', base, '--prompt', WHISPER_PROMPT], 60 * 60 * 1000);
+    '-ojf', '-of', base, '--prompt', WHISPER_PROMPT], 60 * 60 * 1000, signal);
   const j = JSON.parse(fs.readFileSync(`${base}.json`, 'utf8'));
   const words = [];
   for (const seg of j.transcription) {
@@ -73,15 +87,16 @@ async function transcribe(wav, key) {
 }
 
 // Everything the planner needs about one source file. onStep(label) reports progress.
-export async function analyzeSource(mediaPath, onStep = () => {}) {
+export async function analyzeSource(mediaPath, onStep = () => {}, signal) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   const key = cacheKey(mediaPath);
   onStep(`Extracting audio: ${path.basename(mediaPath)}`);
-  const wav = await extractWav(mediaPath, key);
+  const wav = await extractWav(mediaPath, key, signal);
+  checkStop(signal);
   onStep(`Measuring loudness: ${path.basename(mediaPath)}`);
   const db = loudnessFrames(wav);
   const cached = fs.existsSync(path.join(CACHE_DIR, `${key}.words.json`));
   onStep(cached ? `Using cached transcript: ${path.basename(mediaPath)}` : `Transcribing (about 1 min per 6 min of audio): ${path.basename(mediaPath)}`);
-  const words = await transcribe(wav, key);
+  const words = await transcribe(wav, key, signal);
   return { mediaPath, db, words };
 }

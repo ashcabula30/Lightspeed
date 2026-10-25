@@ -1,4 +1,4 @@
-// Editing Assistant panel, part 2: client guides, captions and review (QA + handoff note).
+// Editing Assistant panel, part 2: client guides and review (QA + handoff note).
 // Loads after main.js and uses its helpers (request, show, setMeta, onClick, ...).
 const CLIENT_KEY = 'ea-client';
 
@@ -88,7 +88,6 @@ function chooseClient(id) {
     setMeta('client-meta', 'None chosen');
     show($('client-guide'), false);
     show($('client-empty'), true);
-    $('cap-words-hint').textContent = "Set from the client's guide when it has a words-per-line rule.";
     return;
   }
   setMeta('client-meta', 'Loading…');
@@ -100,28 +99,6 @@ function applyClient(c) {
   clientName = c.name;
   setMeta('client-meta', c.name, 'ok');
   renderGuide(c.markdown);
-  if (c.hints && c.hints.wordsPerCue) {
-    $('cap-words').value = String(c.hints.wordsPerCue);
-    $('cap-words-hint').textContent = `${c.name}'s guide: ${c.hints.wordsPerCue} words max per line.`;
-  } else {
-    $('cap-words-hint').textContent = `${c.name}'s guide has no words-per-line rule; using your setting.`;
-  }
-}
-
-// ---------- captions ----------
-function capOptions() {
-  return {
-    wordsPerCue: Math.max(1, Math.min(8, Math.round(Number($('cap-words').value) || 4))),
-    uppercase: isOn('cap-upper'),
-    stripPunctuation: isOn('cap-punct'),
-  };
-}
-
-function capNotice(text, isError) {
-  const el = $('cap-done');
-  el.className = `notice${isError ? ' notice-error' : ''}`;
-  el.style.display = '';
-  el.textContent = text;
 }
 
 // ---------- review: QA + handoff ----------
@@ -197,27 +174,6 @@ messageHooks.push((msg) => {
       applyClient(msg.client);
       return true;
 
-    case 'captions-busy':
-      setDisabled($('cap-make'), msg.busy || !online);
-      $('cap-make').textContent = msg.busy ? 'Working…' : 'Make captions';
-      setMeta('cap-meta', msg.busy ? 'Working…' : 'From the transcript', msg.busy ? 'busy' : '');
-      if (!msg.busy) show($('cap-working'), false);
-      return true;
-    case 'captions-progress':
-      show($('cap-working'), true);
-      $('cap-progress').textContent = msg.label || '';
-      return true;
-    case 'captions-done': {
-      const r = msg.result;
-      capNotice(`Added ${r.cues} captions to "${r.sequence}". Starts: ${r.preview.join(' / ')}. Style them in Premiere (Essential Graphics) with the client's font. File: ${r.file}`);
-      setMeta('cap-meta', `${r.cues} captions added`, 'ok');
-      return true;
-    }
-    case 'captions-error':
-      capNotice(msg.error, true);
-      setMeta('cap-meta', 'Error', 'bad');
-      return true;
-
     case 'qa-busy':
       show($('qa-working'), msg.busy);
       $('qa-run').textContent = msg.busy ? 'Checking…' : 'Run QA checks';
@@ -234,7 +190,7 @@ messageHooks.push((msg) => {
       return true;
     }
     case 'handoff-draft':
-      $('handoff-text').value = msg.text;
+      setValue('handoff-text', msg.text);
       show($('handoff-out'), true);
       $('handoff-copied').textContent = 'Edit it here if you like, then copy. Nothing is posted.';
       return true;
@@ -251,7 +207,6 @@ messageHooks.push((msg) => {
 
 controlHooks.push(() => {
   const blocked = !online || jobBusy;
-  setDisabled($('cap-make'), blocked);
   setDisabled($('qa-run'), blocked);
   setDisabled($('handoff-make'), !online);
   setDisabled($('handoff-copy'), false);
@@ -261,19 +216,13 @@ connectHooks.push(() => request('clients-list'));
 
 // ---------- wiring ----------
 $('client-select').addEventListener('change', () => chooseClient($('client-select').value));
-onClick($('cap-make'), () => {
-  show($('cap-done'), false);
-  show($('cap-working'), true);
-  $('cap-progress').textContent = 'Starting…';
-  request('captions-make', { options: capOptions() });
-});
 onClick($('qa-run'), () => {
   show($('qa-error'), false);
   request('qa-run', { client: clientId || null });
 });
-onClick($('handoff-make'), () => request('handoff-draft', { client: clientId || null, note: $('handoff-extra').value }));
+onClick($('handoff-make'), () => request('handoff-draft', { client: clientId || null, note: getValue('handoff-extra') }));
 onClick($('handoff-copy'), () => {
-  copyText($('handoff-text').value)
+  copyText(getValue('handoff-text'))
     .then(() => { $('handoff-copied').textContent = 'Copied. Paste it into ClickUp or Slack.'; })
     .catch(() => { $('handoff-copied').textContent = "Couldn't copy; select the text and press Ctrl+C."; });
 });

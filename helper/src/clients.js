@@ -22,18 +22,10 @@ export function listClients(config) {
   return { dir, clients };
 }
 
-// Settings other tools can take from a guide, e.g. "3-4 words per line" -> captions of 4 words.
-function hintsFrom(markdown) {
-  const hints = {};
-  const words = markdown.match(/(\d)\s*[-–]\s*(\d)\s+words per line/i) || markdown.match(/(\d)\s+words per line/i);
-  if (words) hints.wordsPerCue = Number(words[2] || words[1]);
-  return hints;
-}
-
 export function getClient(config, id) {
   if (!/^[\w-]+$/.test(String(id))) throw new Error('Unknown client.');
   const file = path.join(clientsDir(config), `${id}.md`);
   if (!fs.existsSync(file)) throw new Error(`No guide for ${id} in the knowledge base.`);
   const markdown = fs.readFileSync(file, 'utf8');
-  return { id, name: titleOf(markdown, id), markdown, hints: hintsFrom(markdown) };
+  return { id, name: titleOf(markdown, id), markdown };
 }

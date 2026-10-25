@@ -26,6 +26,14 @@
   </div>
   <div id="usage-reset" class="usage-reset">Claude usage appears after your first message.</div>
 
+  <div id="recovery" class="notice notice-warn hidden">
+    <div id="recovery-text">Premiere wants a safety check before more edits.</div>
+    <div class="btn-row">
+      <div class="btn btn-secondary btn-small grow" id="recovery-check" role="button">Review safety check</div>
+      <div class="btn btn-primary btn-small hidden" id="recovery-ack" role="button">Continue</div>
+    </div>
+  </div>
+
   <!-- Clients -->
   <div class="panel" data-panel="clients">
     <div class="panel-head">
@@ -38,7 +46,7 @@
         <option value="">Choose a client…</option>
       </select>
       <div id="client-guide" class="guide hidden"></div>
-      <div id="client-empty" class="hint">The guide shows fonts, text rules, must-dos and where files live. Captions and QA use the client you pick.</div>
+      <div id="client-empty" class="hint">The guide shows fonts, text rules, must-dos and where files live. QA lists the must-dos of the client you pick.</div>
     </div>
   </div>
 
@@ -97,6 +105,10 @@
       <div id="ac-working" class="working hidden">
         <div id="ac-progress" class="working-text"></div>
         <div class="bar"><div id="ac-bar" class="bar-fill bar-accent"></div></div>
+        <div class="btn-row">
+          <span class="hint grow">Stop finishes the current step first, so nothing is left half-cut.</span>
+          <div class="btn btn-secondary btn-small" id="ac-stop" role="button">Stop</div>
+        </div>
       </div>
 
       <div id="ac-results" class="result hidden">
@@ -123,49 +135,9 @@
 
       <div id="ac-done" class="notice hidden"></div>
       <div id="ac-after" class="btn-row hidden">
-        <div class="btn btn-secondary grow" id="ac-restore" role="button">Open backup</div>
+        <div class="btn btn-secondary grow" id="ac-undo" role="button">Undo cuts</div>
       </div>
       <div id="ac-lists"></div>
-    </div>
-  </div>
-
-  <!-- Captions -->
-  <div class="panel" data-panel="captions">
-    <div class="panel-head">
-      <span class="chevron">&#9656;</span>
-      <span class="panel-title">Captions</span>
-      <span class="panel-meta" id="cap-meta">From the transcript</span>
-    </div>
-    <div class="panel-body">
-      <div class="field">
-        <label class="label" for="cap-words">Words per caption</label>
-        <div class="input-suffix">
-          <div class="field-box"><input id="cap-words" class="input" type="number" min="1" max="8" step="1" value="4"></div>
-          <span class="suffix">max</span>
-        </div>
-        <div id="cap-words-hint" class="hint">Set from the client's guide when it has a words-per-line rule.</div>
-      </div>
-      <div class="switch-row" id="cap-upper">
-        <div class="switch-text">
-          <div class="switch-title">All caps</div>
-        </div>
-        <div class="switch"><div class="knob"></div></div>
-      </div>
-      <div class="switch-row on" id="cap-punct">
-        <div class="switch-text">
-          <div class="switch-title">Remove punctuation</div>
-          <div class="hint">Short-form style, no commas or full stops</div>
-        </div>
-        <div class="switch"><div class="knob"></div></div>
-      </div>
-      <div class="actions">
-        <div class="btn btn-primary btn-block" id="cap-make" role="button">Make captions</div>
-      </div>
-      <div class="hint center">Run it after auto-cut so the timing matches the final edit. Ums are left out.</div>
-      <div id="cap-working" class="working hidden">
-        <div id="cap-progress" class="working-text"></div>
-      </div>
-      <div id="cap-done" class="notice hidden"></div>
     </div>
   </div>
 

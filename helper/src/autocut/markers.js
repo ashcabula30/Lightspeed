@@ -27,7 +27,7 @@ export async function clearCutMarkers(sequenceId) {
   return markers.length;
 }
 
-export async function placeCutMarkers(analysis, onProgress = () => {}) {
+export async function placeCutMarkers(analysis, onProgress = () => {}, signal) {
   const seq = analysis.sequence;
   await clearCutMarkers(seq.id); // replace an earlier preview rather than stacking a second one
   const markers = analysis.cuts.map((c) => ({
@@ -38,6 +38,7 @@ export async function placeCutMarkers(analysis, onProgress = () => {}) {
     comments: 'Editing Assistant auto-cut preview. Delete this marker to keep this part.',
   }));
   for (let i = 0; i < markers.length; i += BATCH) {
+    if (signal && signal.aborted) break;
     onProgress({ label: `Placing markers ${i + 1}-${Math.min(markers.length, i + BATCH)} of ${markers.length}`, done: i, total: markers.length });
     await call('add_markers_batch', { sequence_id: seq.id, markers: markers.slice(i, i + BATCH) });
   }

@@ -50,3 +50,27 @@ export async function close() {
   if (client) await client.close().catch(() => {});
   client = null;
 }
+
+// Premiere's connector blocks edits after a command that didn't finish cleanly (for example the
+// helper being closed mid-session) until someone reviews the current state and acknowledges it.
+const REASONS = {
+  abandoned_process_lease: 'The helper was closed while it was connected to Premiere.',
+};
+
+export async function inspectRecovery() {
+  const r = await call('inspect_operation_recovery', { backend: 'cep' });
+  if (!r.recoveryRequired) return { required: false };
+  const clips = (r.snapshot && r.snapshot.clips) || [];
+  return {
+    required: true,
+    reason: REASONS[r.reason] || `Premiere reported: ${r.reason}.`,
+    clipCount: clips.length,
+    recoveryRevision: r.recoveryRevision,
+    hostStateRevision: r.hostStateRevision,
+  };
+}
+
+export async function acknowledgeRecovery(recoveryRevision, hostStateRevision) {
+  await call('acknowledge_operation_recovery', { backend: 'cep', expected_recovery_revision: recoveryRevision,
+    expected_host_state_revision: hostStateRevision, reviewed: true });
+}

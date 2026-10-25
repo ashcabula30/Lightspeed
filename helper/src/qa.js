@@ -13,7 +13,7 @@ function gapsFrom(data) {
     t: num(g.startSeconds, g.start_seconds, g.start, g.gapStart),
     seconds: num(g.durationSeconds, g.duration_seconds, g.duration),
     track: `${(g.trackType || g.track_type || g.type || '').startsWith('a') ? 'A' : 'V'}${num(g.trackIndex, g.track_index, 0) + 1}`,
-  })).filter((g) => Number.isFinite(g.t));
+  })); // kept even without a readable time, so a gap is never silently dropped from the count
 }
 
 function offlineFrom(data) {
@@ -65,7 +65,7 @@ export async function runQa(config, clientId) {
       gaps.push(...gapsFrom(await call('get_timeline_gaps', { sequence_id: seq.id, track_type, track_index: 0, min_gap_seconds: 0.04, clip_limit: 50 })));
     }
     return gaps.length
-      ? { state: 'missing', detail: `${gaps.length} gap${gaps.length === 1 ? '' : 's'} (black frames or silence).`, times: gaps.slice(0, 20).map((g) => ({ t: g.t, text: `${g.track} gap${g.seconds ? `, ${g.seconds.toFixed(2)}s` : ''}` })) }
+      ? { state: 'missing', detail: `${gaps.length} gap${gaps.length === 1 ? '' : 's'} (black frames or silence).`, times: gaps.filter((g) => Number.isFinite(g.t)).slice(0, 20).map((g) => ({ t: g.t, text: `${g.track} gap${g.seconds ? `, ${g.seconds.toFixed(2)}s` : ''}` })) }
       : { state: 'ok', detail: 'No black frames or dropped audio between clips.' };
   }));
   checks.push(await check('No offline media', async () => {

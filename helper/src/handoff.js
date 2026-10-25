@@ -1,11 +1,11 @@
-// Internal-review handoff note, drafted from what happened in this session (auto-cut, captions, QA).
+// Internal-review handoff note, drafted from what happened in this session (auto-cut, QA).
 // Text only: the editor copies it into ClickUp or Slack themselves; nothing is ever posted from here.
 const mmss = (s) => {
   const t = Math.max(0, Math.round(s || 0));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
 
-export function draftHandoff({ clientName, qa, autocut, captions, note }) {
+export function draftHandoff({ clientName, qa, autocut, note }) {
   const seq = qa && qa.sequence;
   const lines = [];
   lines.push(`${clientName ? clientName + ': ' : ''}${seq ? `"${seq.name}"` : 'this edit'} is ready for internal review.`);
@@ -14,7 +14,6 @@ export function draftHandoff({ clientName, qa, autocut, captions, note }) {
   if (autocut && autocut.applied) {
     lines.push(`- Cleaned up dialogue: ${autocut.applied} cuts (retakes, ums, long pauses)${autocut.durationBefore ? `, ${mmss(autocut.durationBefore)} to ${mmss(autocut.durationAfter || autocut.expectedAfter)}` : ''}.`);
   }
-  if (captions) lines.push(`- Captions added (${captions.cues} lines).`);
   if (qa) {
     const issues = qa.checks.filter((c) => c.state !== 'ok');
     lines.push(issues.length

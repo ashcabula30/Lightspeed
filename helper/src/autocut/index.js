@@ -1,6 +1,6 @@
 // Auto-cut orchestration: read the sequence from Premiere, analyse its sources, plan the cuts.
 import { call } from '../premiere.js';
-import { analyzeSource } from './media.js';
+import { analyzeSource, checkStop } from './media.js';
 import { buildTimeline, planCuts } from './plan.js';
 
 // All audio clips on track A1 (index 0) of a sequence, following pagination.
@@ -19,8 +19,8 @@ async function audioClips(sequenceId) {
 }
 
 // Loudness frames and transcript words for the A1 dialogue, mapped onto timeline time.
-// Shared by auto-cut and captions; transcripts are cached per source file.
-export async function readSequenceAudio(sequenceId, onStep = () => {}) {
+// Transcripts are cached per source file, so re-running is quick.
+export async function readSequenceAudio(sequenceId, onStep = () => {}, signal) {
   onStep('Reading the sequence');
   const state = await call('get_premiere_state');
   const seqId = sequenceId || (state.activeSequence && state.activeSequence.id);
@@ -34,15 +34,17 @@ export async function readSequenceAudio(sequenceId, onStep = () => {}) {
   const sources = new Map();
   const paths = [...new Set(clips.map((c) => c.sourceMediaPath).filter(Boolean))];
   for (const [i, p] of paths.entries()) {
-    sources.set(p, await analyzeSource(p, (label) => onStep(`${label} (${i + 1}/${paths.length})`)));
+    checkStop(signal);
+    sources.set(p, await analyzeSource(p, (label) => onStep(`${label} (${i + 1}/${paths.length})`), signal));
   }
   const timeline = buildTimeline(clips.map((c) => ({ start: c.startSeconds, end: c.endSeconds, inPoint: c.inPointSeconds, mediaPath: c.sourceMediaPath })),
     sources, info.durationSeconds);
   return { sequence: { id: seqId, name: info.name, fps, duration: info.durationSeconds }, timeline };
 }
 
-export async function analyzeSequence(sequenceId, settings, onStep = () => {}) {
-  const { sequence, timeline } = await readSequenceAudio(sequenceId, onStep);
+export async function analyzeSequence(sequenceId, settings, onStep = () => {}, signal) {
+  const { sequence, timeline } = await readSequenceAudio(sequenceId, onStep, signal);
+  checkStop(signal);
   onStep('Planning cuts');
   const plan = planCuts(timeline, settings, sequence.fps, sequence.duration);
   return { sequence, ...plan };

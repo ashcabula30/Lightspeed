@@ -4,11 +4,10 @@ import { WebSocketServer } from 'ws';
 import { runChecks } from './checks.js';
 import { ClaudeChat } from './claude.js';
 import { loadConfig } from './config.js';
-import { call } from './premiere.js';
+import { acknowledgeRecovery, call, close as closePremiere, inspectRecovery } from './premiere.js';
 import { analyzeSequence } from './autocut/index.js';
-import { applyCuts } from './autocut/apply.js';
+import { applyCuts, undoCuts } from './autocut/apply.js';
 import { clearCutMarkers, placeCutMarkers } from './autocut/markers.js';
-import { makeCaptions } from './captions.js';
 import { getClient, listClients } from './clients.js';
 import { runQa } from './qa.js';
 import { draftHandoff } from './handoff.js';
@@ -30,10 +29,12 @@ function broadcast(msg) {
 const chat = new ClaudeChat({ workdir: config.workdir, onEvent: broadcast });
 
 // What this session has done, for Apply, Restore and the handoff draft.
-const session = { analysis: null, applied: null, backup: null, captions: null, qa: null };
+const session = { analysis: null, applied: null, backup: null, qa: null };
 
 // Premiere jobs run one at a time (they share the active sequence, playhead and undo history).
 let jobBusy = null;
+// Stop for the running auto-cut job (analysis, markers or apply).
+let jobAbort = null;
 
 async function runJob(kind, prefix, job) {
   if (jobBusy) throw new Error(`Busy with ${jobBusy}. Try again when it finishes.`);
@@ -43,11 +44,16 @@ async function runJob(kind, prefix, job) {
   try {
     await job();
   } catch (err) {
+    if (err.stopped) {
+      broadcast({ type: `${prefix}-stopped`, kind });
+      return;
+    }
     console.error(`[helper] ${kind} failed:`, err);
-    const hint = err.recovery ? ' Premiere asked for a safety check after an earlier failed command; ask in the chat to inspect and acknowledge the recovery, then try again.' : '';
-    broadcast({ type: `${prefix}-error`, kind, error: `${err.message}${hint}` });
+    const message = err.recovery ? 'Premiere wants a safety check before more edits. Use Review safety check at the top of the panel.' : err.message;
+    broadcast({ type: `${prefix}-error`, kind, error: message, recovery: !!err.recovery });
   } finally {
     jobBusy = null;
+    jobAbort = null;
     broadcast({ type: `${prefix}-busy`, busy: false, kind });
     broadcast({ type: 'job-busy', busy: false, kind });
   }
@@ -87,7 +93,8 @@ wss.on('connection', (ws) => {
         case 'autocut-analyze':
           return await runJob('auto-cut', 'autocut', async () => {
             session.analysis = null;
-            const result = await analyzeSequence(null, msg.settings || {}, progress('autocut'));
+            jobAbort = new AbortController();
+            const result = await analyzeSequence(null, msg.settings || {}, progress('autocut'), jobAbort.signal);
             session.analysis = result;
             broadcast({ type: 'autocut-result', result: { ...result, cuts: undefined, cutCount: result.cuts.length,
               cutRanges: result.cuts.map((c) => [c.start, c.end]) } });
@@ -95,7 +102,8 @@ wss.on('connection', (ws) => {
         case 'autocut-markers':
           return await runJob('placing cut markers', 'autocut', async () => {
             if (!session.analysis) throw new Error('Run Analyze first.');
-            const count = await placeCutMarkers(session.analysis, progress('autocut'));
+            jobAbort = new AbortController();
+            const count = await placeCutMarkers(session.analysis, progress('autocut'), jobAbort.signal);
             session.analysis.markersPlaced = true;
             broadcast({ type: 'autocut-markers', placed: true, count });
           });
@@ -112,17 +120,30 @@ wss.on('connection', (ws) => {
             if (!session.analysis) throw new Error('Run Analyze first.');
             const analysis = session.analysis;
             session.analysis = null; // a plan is only ever applied once
-            const result = await applyCuts(analysis, progress('autocut'));
+            jobAbort = new AbortController();
+            const result = await applyCuts(analysis, progress('autocut'), jobAbort.signal);
             session.applied = { ...result, sequence: analysis.sequence };
             if (result.backup) session.backup = { ...result.backup, of: analysis.sequence };
             broadcast({ type: 'autocut-applied', result });
           });
-        case 'autocut-restore':
-          return await runJob('opening the backup', 'autocut', async () => {
-            if (!session.backup) throw new Error('No backup from this session.');
-            await call('set_active_sequence', { sequence_id: session.backup.id });
-            broadcast({ type: 'autocut-restored', backup: session.backup });
+        case 'autocut-stop':
+          if (jobAbort) jobAbort.abort();
+          return broadcast({ type: 'autocut-progress', label: 'Stopping after the current step…' });
+        case 'autocut-undo':
+          return await runJob('undoing the cuts', 'autocut', async () => {
+            if (!session.backup) throw new Error('No auto-cut to undo in this session (the helper only remembers cuts made since it started).');
+            const result = await undoCuts(session.backup);
+            session.backup = null;
+            session.applied = null;
+            broadcast({ type: 'autocut-undone', result });
           });
+        case 'recovery-check':
+          if (jobBusy) return send(ws, { type: 'error', error: `Busy with ${jobBusy}.` });
+          return send(ws, { type: 'recovery', ...(await inspectRecovery()) });
+        case 'recovery-ack':
+          if (jobBusy) return send(ws, { type: 'error', error: `Busy with ${jobBusy}.` });
+          await acknowledgeRecovery(String(msg.recoveryRevision), String(msg.hostStateRevision));
+          return broadcast({ type: 'recovery', required: false, cleared: true });
         case 'seek': {
           // Quick and harmless, but still never while another job is moving things around.
           if (jobBusy) return send(ws, { type: 'error', error: `Busy with ${jobBusy}.` });
@@ -130,14 +151,6 @@ wss.on('connection', (ws) => {
           await call('set_playhead_position', { time_seconds: t });
           return send(ws, { type: 'seeked', t });
         }
-
-        // ---------- captions ----------
-        case 'captions-make':
-          return await runJob('captions', 'captions', async () => {
-            const result = await makeCaptions(msg.options || {}, progress('captions'));
-            session.captions = result;
-            broadcast({ type: 'captions-done', result });
-          });
 
         // ---------- clients ----------
         case 'clients-list':
@@ -153,7 +166,7 @@ wss.on('connection', (ws) => {
           });
         case 'handoff-draft': {
           const clientName = msg.client ? getClient(config, msg.client).name : null;
-          const text = draftHandoff({ clientName, qa: session.qa, autocut: session.applied, captions: session.captions, note: msg.note });
+          const text = draftHandoff({ clientName, qa: session.qa, autocut: session.applied, note: msg.note });
           return send(ws, { type: 'handoff-draft', text });
         }
 
@@ -176,4 +189,11 @@ wss.on('error', (err) => {
   process.exit(1);
 });
 
-process.on('SIGINT', () => { chat.stop(); process.exit(0); });
+// Close the Premiere connection cleanly on the way out; a connection cut off mid-session makes
+// Premiere ask for a safety check before the next edit.
+async function shutdown() {
+  chat.stop();
+  await Promise.race([closePremiere(), new Promise((r) => setTimeout(r, 2000))]);
+  process.exit(0);
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP']) process.on(sig, shutdown);

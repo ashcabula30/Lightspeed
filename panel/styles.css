@@ -573,6 +573,8 @@ body {
   padding: 0;
   border: none;
   background-color: transparent;
+  /* Premiere's native dropdown brings its own top margin; zero it so it sits like the other fields. */
+  margin: 0 0 8px 0;
 }
 
 .guide {
@@ -651,3 +653,10 @@ body {
   line-height: 16px;
 }
 .sp-area.handoff-text { height: 150px; }
+
+.notice-warn {
+  background-color: #2e281c;
+  border-color: #5a4a2a;
+  color: #f0dfbd;
+  margin: 0 0 10px 0;
+}
