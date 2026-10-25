@@ -660,3 +660,5 @@ body {
   color: #f0dfbd;
   margin: 0 0 10px 0;
 }
+
+.start-status { color: #e2a23b; word-break: break-word; }

@@ -197,3 +197,6 @@ async function shutdown() {
   process.exit(0);
 }
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP']) process.on(sig, shutdown);
+// One unexpected error (a dropped Premiere connection, a bad reply) shouldn't take the panel offline.
+process.on('uncaughtException', (err) => console.error('[helper] unexpected error, still running:', err));
+process.on('unhandledRejection', (err) => console.error('[helper] unexpected error, still running:', err));

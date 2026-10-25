@@ -169,6 +169,7 @@ function setConnection(isOnline) {
   $('conn-text').textContent = isOnline ? 'Connected' : 'Offline';
   $('conn').firstElementChild.className = `dot ${isOnline ? 'dot-on' : 'dot-off'}`;
   show($('start-area'), !isOnline && IN_UXP);
+  if (isOnline) $('start-status').textContent = '';
   if (!isOnline) {
     jobBusy = false;
     setBusy(false);
@@ -200,15 +201,30 @@ function setBusy(value) {
   updateControls();
 }
 
-// Opens helper/start-helper.cmd (next to the panel folder) in a console window.
+// Opens helper/start-helper.cmd (next to the panel folder) in a console window. Premiere can
+// refuse or silently ignore the request, so the panel always says what to do if nothing connects.
 async function startHelper() {
-  const uxp = require('uxp');
-  const folder = await uxp.storage.localFileSystem.getPluginFolder();
-  const sep = folder.nativePath.indexOf('\\') >= 0 ? '\\' : '/';
-  const parent = folder.nativePath.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '');
-  const script = `${parent}${sep}helper${sep}start-helper.cmd`;
-  const result = await uxp.shell.openPath(script, 'Starts the Editing Assistant helper so the panel can connect.');
-  if (result) showFatal(`Couldn't start the helper (${result}). Run ${script} yourself.`);
+  const status = $('start-status');
+  let script = 'helper\\start-helper.cmd in the Editing Assistant folder';
+  status.textContent = 'Starting the helper…';
+  try {
+    const uxp = require('uxp');
+    const folder = await uxp.storage.localFileSystem.getPluginFolder();
+    const sep = folder.nativePath.indexOf('\\') >= 0 ? '\\' : '/';
+    const parent = folder.nativePath.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '');
+    script = `${parent}${sep}helper${sep}start-helper.cmd`;
+    const result = await uxp.shell.openPath(script, 'Starts the Editing Assistant helper so the panel can connect.');
+    if (result) {
+      status.textContent = `Premiere couldn't open it (${result}). Double-click ${script} instead.`;
+      return;
+    }
+  } catch (e) {
+    status.textContent = `Premiere couldn't open it (${e.message}). Double-click ${script} instead.`;
+    return;
+  }
+  setTimeout(() => {
+    if (!online) status.textContent = `Still offline. If no helper window opened, double-click ${script}. Running install-autostart.cmd there once makes it start by itself at login.`;
+  }, 8000);
 }
 
 // ---------- setup checklist ----------
