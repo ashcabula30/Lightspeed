@@ -591,3 +591,6 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #5e5e5e; }
+
+/* Inside Premiere: the Spectrum text area has its own outline, so space the Send row away from it. */
+.composer-row-native { padding: 8px 0 0 0; }

@@ -131,6 +131,13 @@ function useSpectrumFields() {
     if (old.value) { field.setAttribute('value', old.value); field.value = old.value; }
   });
   each('.field-box, .composer, .select', (box) => setClass(box, 'native-ui', true));
+  // With the composer's frame gone, the Send row needs its own gap from the text field.
+  // Inline, because Premiere ignored the stylesheet padding here.
+  each('.composer-row', (row) => {
+    setClass(row, 'composer-row-native', true);
+    row.style.marginTop = '10px';
+  });
+  each('.sp-area', (area) => { area.style.height = hasClass(area, 'handoff-text') ? '140px' : '56px'; });
 }
 if (IN_UXP) {
   try { useSpectrumFields(); } catch (e) { showFatal(e.message); }
