@@ -85,6 +85,13 @@ wss.on('connection', (ws) => {
         }
         case 'chat-stop':
           return chat.stop();
+        case 'usage-check':
+          try {
+            await chat.checkUsage();
+          } catch (err) {
+            send(ws, { type: 'usage-error', error: String(err.message || err) });
+          }
+          return;
         case 'chat-new':
           chat.reset();
           return broadcast({ type: 'chat-cleared' });

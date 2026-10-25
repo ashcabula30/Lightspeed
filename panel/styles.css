@@ -662,3 +662,12 @@ body {
 }
 
 .start-status { color: #e2a23b; word-break: break-word; }
+
+/* Usage meter, inside the Chat section */
+.usage-box {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #303030;
+}
+.usage-foot { margin-top: 2px; }
+.usage-foot .usage-reset { margin: 0; }

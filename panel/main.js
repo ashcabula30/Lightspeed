@@ -188,6 +188,7 @@ function setConnection(isOnline) {
 function updateControls() {
   acUpdateControls();
   setDisabled(refreshBtn, !online);
+  if ($('usage-check').textContent !== 'Checking…') setDisabled($('usage-check'), !online);
   setDisabled(sendBtn, !online || busy);
   setDisabled(newChatBtn, !online || busy);
   show(stopBtn, busy);
@@ -197,7 +198,8 @@ function updateControls() {
 function setBusy(value) {
   busy = value;
   if (!value) activityEl.textContent = '';
-  setMeta('chat-meta', value ? 'Replying…' : 'Claude Code', value ? 'busy' : '');
+  if (value) setMeta('chat-meta', 'Replying…', 'busy');
+  else setMeta('chat-meta', ...chatIdleMeta());
   updateControls();
 }
 
@@ -281,9 +283,16 @@ function formatReset(epochSeconds) {
   return `${when} (in ${left})`;
 }
 
+// Saved numbers can be old: once a window's reset time has passed, it is back to 0%.
+function usedNow(window) {
+  if (!window) return null;
+  return window.resetsAt && window.resetsAt * 1000 <= Date.now() ? 0 : window.used;
+}
+
 function setMeter(prefix, window) {
-  const pct = window ? Math.round(window.used * 100) : 0;
-  $(`${prefix}-text`).textContent = window ? `${pct}%` : 'n/a';
+  const used = usedNow(window);
+  const pct = used === null ? 0 : Math.round(used * 100);
+  $(`${prefix}-text`).textContent = used === null ? 'n/a' : `${pct}%`;
   const fill = $(`${prefix}-fill`);
   fill.style.width = `${Math.min(100, pct)}%`;
   fill.className = `bar-fill ${pct >= 90 ? 'bar-red' : pct >= 70 ? 'bar-amber' : 'bar-green'}`;
@@ -291,12 +300,22 @@ function setMeter(prefix, window) {
 
 let lastUsage = null;
 
+function chatIdleMeta() {
+  const used = lastUsage && usedNow(lastUsage.fiveHour);
+  if (used === null || used === undefined) return ['Claude Code', ''];
+  const pct = Math.round(used * 100);
+  return [`5-hour ${pct}% used`, pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : ''];
+}
+
 function renderUsage(usage) {
   lastUsage = usage;
   setMeter('u5', usage.fiveHour);
   setMeter('u7', usage.sevenDay);
-  const reset = usage.fiveHour && formatReset(usage.fiveHour.resetsAt);
-  $('usage-reset').textContent = reset ? `5-hour limit resets ${reset}` : '';
+  const five = usage.fiveHour;
+  const reset = five && (usedNow(five) === 0 && five.used > 0 ? 'has reset' : `resets ${formatReset(five.resetsAt)}`);
+  const checked = new Date(usage.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  $('usage-reset').textContent = `${reset ? `5-hour ${reset}. ` : ''}Checked ${checked}.`;
+  if (!busy) setMeta('chat-meta', ...chatIdleMeta());
 }
 
 // ---------- chat ----------
@@ -311,15 +330,22 @@ function addMessage(kind, text) {
   return div;
 }
 
+// Check asks the helper for fresh numbers (one tiny request on Claude's cheapest model).
+function setUsageChecking(on) {
+  const btn = $('usage-check');
+  btn.textContent = on ? 'Checking…' : 'Check';
+  setDisabled(btn, on || !online);
+}
+
 let usageWarnedFor = null; // the reset time of the window already warned about
 
 function sendPrompt() {
   const text = getValue('prompt').trim();
   if (!text || busy || !online) return;
   const five = lastUsage && lastUsage.fiveHour;
-  if (five && five.used >= USAGE_WARN && usageWarnedFor !== five.resetsAt) {
+  if (five && usedNow(five) >= USAGE_WARN && usageWarnedFor !== five.resetsAt) {
     usageWarnedFor = five.resetsAt;
-    addMessage('note', `You've used ${Math.round(five.used * 100)}% of your 5-hour limit (resets ${formatReset(five.resetsAt)}). Long tasks may hit the limit. Press Send again to go ahead.`);
+    addMessage('note', `You've used ${Math.round(usedNow(five) * 100)}% of your 5-hour limit (resets ${formatReset(five.resetsAt)}). Long tasks may hit the limit. Press Send again to go ahead.`);
     return;
   }
   if (request('chat-send', { text })) {
@@ -372,6 +398,11 @@ function handleMessage(msg) {
       break;
     case 'usage':
       renderUsage(msg.usage);
+      setUsageChecking(false);
+      break;
+    case 'usage-error':
+      setUsageChecking(false);
+      $('usage-reset').textContent = `Couldn't check usage: ${msg.error}`;
       break;
     case 'chat-user':
       addMessage('user', msg.text);
@@ -701,6 +732,10 @@ function wire() {
   onClick($('recovery-check'), () => request('recovery-check'));
   onClick($('recovery-ack'), () => {
     if (recoveryInfo) request('recovery-ack', { recoveryRevision: recoveryInfo.recoveryRevision, hostStateRevision: recoveryInfo.hostStateRevision });
+  });
+  onClick($('usage-check'), () => {
+    setUsageChecking(true);
+    if (!request('usage-check')) setUsageChecking(false);
   });
   onClick(refreshBtn, () => {
     showChecking();

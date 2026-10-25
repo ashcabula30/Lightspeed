@@ -14,18 +14,6 @@
     <div class="status" id="conn"><span class="dot dot-off"></span><span id="conn-text">Offline</span></div>
   </header>
 
-  <div class="usage" id="usage">
-    <div class="usage-item">
-      <div class="usage-row"><span class="usage-label">5-hour</span><span id="u5-text" class="usage-value">—</span></div>
-      <div class="bar"><div id="u5-fill" class="bar-fill"></div></div>
-    </div>
-    <div class="usage-item">
-      <div class="usage-row"><span class="usage-label">Weekly</span><span id="u7-text" class="usage-value">—</span></div>
-      <div class="bar"><div id="u7-fill" class="bar-fill"></div></div>
-    </div>
-  </div>
-  <div id="usage-reset" class="usage-reset">Claude usage appears after your first message.</div>
-
   <div id="recovery" class="notice notice-warn hidden">
     <div id="recovery-text">Premiere wants a safety check before more edits.</div>
     <div class="btn-row">
@@ -189,6 +177,22 @@
       <span class="btn btn-ghost btn-small" id="new-chat" role="button">New</span>
     </div>
     <div class="panel-body">
+      <div class="usage-box">
+        <div class="usage" id="usage">
+          <div class="usage-item">
+            <div class="usage-row"><span class="usage-label">5-hour</span><span id="u5-text" class="usage-value">—</span></div>
+            <div class="bar"><div id="u5-fill" class="bar-fill"></div></div>
+          </div>
+          <div class="usage-item">
+            <div class="usage-row"><span class="usage-label">Weekly</span><span id="u7-text" class="usage-value">—</span></div>
+            <div class="bar"><div id="u7-fill" class="bar-fill"></div></div>
+          </div>
+        </div>
+        <div class="btn-row usage-foot">
+          <span id="usage-reset" class="usage-reset grow">No usage numbers yet. Press Check.</span>
+          <div class="btn btn-ghost btn-small" id="usage-check" role="button">Check</div>
+        </div>
+      </div>
       <div id="messages" class="messages">
         <div class="empty">Ask about your project, the timeline, or anything else. Claude can read Premiere; edits come later.</div>
       </div>

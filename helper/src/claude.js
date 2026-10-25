@@ -3,9 +3,34 @@
 // usage (5-hour / weekly windows) and a final result. One conversation continues via --resume.
 import { spawn, execFile } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const isWin = process.platform === 'win32';
+// Last known plan usage, kept between helper restarts so the meter has numbers before any chat.
+const USAGE_FILE = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), '.cache'), 'EditingAssistant', 'usage.json');
+
+function loadUsage() {
+  try { return JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8')); } catch { return null; }
+}
+function saveUsage(usage) {
+  try {
+    fs.mkdirSync(path.dirname(USAGE_FILE), { recursive: true });
+    fs.writeFileSync(USAGE_FILE, JSON.stringify(usage));
+  } catch { /* the meter still works for this session */ }
+}
+
+// Claude Code reports usage in a rate_limit_event alongside each reply.
+function parseUsage(ev) {
+  const info = ev.rate_limit_info || {};
+  const w = info.unifiedWindows || {};
+  return {
+    status: info.status,
+    fiveHour: w.five_hour ? { used: w.five_hour.utilization, resetsAt: w.five_hour.resetsAt } : null,
+    sevenDay: w.seven_day ? { used: w.seven_day.utilization, resetsAt: w.seven_day.resetsAt } : null,
+    updatedAt: Date.now(),
+  };
+}
 
 // Find the real claude executable so the user's text never passes through a shell.
 export function findClaudeExecutable() {
@@ -36,7 +61,51 @@ export class ClaudeChat {
     this.onEvent = onEvent;
     this.sessionId = null;
     this.proc = null;
-    this.lastUsage = null;
+    this.lastUsage = loadUsage();
+    this.checking = null;
+  }
+
+  setUsage(usage) {
+    this.lastUsage = usage;
+    saveUsage(usage);
+    this.onEvent({ type: 'usage', usage });
+  }
+
+  // Fresh usage numbers without a chat message: one tiny request on the cheapest model, with no
+  // tools, no MCP servers and no project files, then read the usage that comes back with it.
+  checkUsage() {
+    if (this.checking) return this.checking;
+    this.checking = (async () => {
+      const exe = await findClaudeExecutable();
+      if (!exe) throw new Error('Claude Code was not found.');
+      return await new Promise((resolve, reject) => {
+        const proc = spawn(exe, ['-p', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', '--tools', '', '--strict-mcp-config'],
+          { cwd: os.tmpdir(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+        proc.stdin.end('Reply with the single word OK.');
+        let buffer = '', got = null, stderr = '';
+        const timer = setTimeout(() => proc.kill(), 60000);
+        proc.stdout.on('data', (chunk) => {
+          buffer += chunk;
+          let nl;
+          while ((nl = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            try {
+              const ev = JSON.parse(line);
+              if (ev.type === 'rate_limit_event') got = parseUsage(ev);
+            } catch { /* not JSON */ }
+          }
+        });
+        proc.stderr.on('data', (chunk) => { stderr += chunk; });
+        proc.on('error', (err) => { clearTimeout(timer); reject(err); });
+        proc.on('close', () => {
+          clearTimeout(timer);
+          if (got) { this.setUsage(got); resolve(got); }
+          else reject(new Error(stderr.trim().split('\n').pop() || 'Claude Code did not report usage.'));
+        });
+      });
+    })().finally(() => { this.checking = null; });
+    return this.checking;
   }
 
   get busy() { return !!this.proc; }
@@ -120,18 +189,9 @@ export class ClaudeChat {
         }
         break;
       }
-      case 'rate_limit_event': {
-        const info = ev.rate_limit_info || {};
-        const w = info.unifiedWindows || {};
-        this.lastUsage = {
-          status: info.status,
-          fiveHour: w.five_hour ? { used: w.five_hour.utilization, resetsAt: w.five_hour.resetsAt } : null,
-          sevenDay: w.seven_day ? { used: w.seven_day.utilization, resetsAt: w.seven_day.resetsAt } : null,
-          updatedAt: Date.now(),
-        };
-        this.onEvent({ type: 'usage', usage: this.lastUsage });
+      case 'rate_limit_event':
+        this.setUsage(parseUsage(ev));
         break;
-      }
       default:
         break;
     }
