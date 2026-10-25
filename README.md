@@ -21,5 +21,5 @@ helper/  Node app on ws://127.0.0.1:7790/panel (local only): dependency checks, 
 1. Foundation: helper, panel, setup checklist (done)
 2. Chat through Claude Code (headless), streaming replies, usage meter (done)
 3. Auto-cut: silences and retakes, preview then apply (done)
-4. Tesseract tools: cards, keyword pop-ins, quotes at the playhead (done; free-form motion graphics come with approvals)
+4. Tesseract tools: cards, keyword pop-ins, motion graphics at the playhead
 5. Extras (zoom, music bed, approval settings) and the installer

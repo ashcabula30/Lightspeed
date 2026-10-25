@@ -53,7 +53,7 @@ async function checkWhisper() {
   return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'ok', detail: `Ready (${path.basename(path.dirname(path.dirname(exe)))}, small.en model)`, paths: { exe, model } };
 }
 
-export function findTesseract() {
+function findTesseract() {
   const candidates = [];
   if (isWin) {
     const pub = path.join(localAppData, 'Tesseract', 'public-cli');

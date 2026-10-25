@@ -72,14 +72,6 @@ async function transcribe(wav, key) {
   return words;
 }
 
-// Words for a source only if they were already transcribed (never starts a transcription).
-export function cachedWords(mediaPath) {
-  try {
-    const f = path.join(CACHE_DIR, `${cacheKey(mediaPath)}.words.json`);
-    return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : null;
-  } catch { return null; }
-}
-
 // Everything the planner needs about one source file. onStep(label) reports progress.
 export async function analyzeSource(mediaPath, onStep = () => {}) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });

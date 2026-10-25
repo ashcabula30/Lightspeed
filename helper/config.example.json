@@ -1,11 +1,3 @@
 {
-  "workdir": "C:\\path\\to\\the\\folder\\Claude\\should\\work\\in",
-  "graphics": {
-    "fontFile": "C:\\path\\to\\a\\font.ttf",
-    "backgrounds": {
-      "dark": "C:\\path\\to\\dark-background-loop.mp4",
-      "light": "C:\\path\\to\\light-background-loop.mp4",
-      "red": "C:\\path\\to\\accent-background-loop.mp4"
-    }
-  }
+  "workdir": "C:\\path\\to\\the\\folder\\Claude\\should\\work\\in"
 }

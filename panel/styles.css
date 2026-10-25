@@ -160,9 +160,7 @@ button { margin-left: 6px; margin-top: 4px; }
 }
 .field { margin-top: 6px; }
 .field label { display: block; font-size: 11px; color: #b0b0b0; margin-bottom: 2px; }
-.field input, .field select, .field textarea { width: 100%; font-size: 12px; box-sizing: border-box; }
-textarea.short { min-height: 44px; }
-#gfx-done { margin-top: 8px; }
+.field input { width: 100%; font-size: 12px; box-sizing: border-box; }
 .field-row {
   display: flex;
   flex-direction: row;

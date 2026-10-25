@@ -138,29 +138,6 @@ export class ClaudeChat {
   }
 }
 
-// A single answer with no tools and no conversation, for small structured jobs (e.g. filling a template).
-export async function askOnce(prompt, workdir) {
-  const exe = await findClaudeExecutable();
-  if (!exe) throw new Error('Claude Code was not found. Install it and sign in, then refresh the setup checklist.');
-  return new Promise((resolve, reject) => {
-    const proc = spawn(exe, ['-p', '--output-format', 'json'], { cwd: workdir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    proc.stdout.on('data', (c) => { out += c; });
-    proc.stderr.on('data', (c) => { err += c; });
-    proc.on('error', (e) => reject(new Error(`Could not start Claude Code: ${e.message}`)));
-    proc.on('close', () => {
-      try {
-        const j = JSON.parse(out);
-        if (j.is_error) return reject(new Error(j.result || 'Claude reported an error.'));
-        resolve(String(j.result || ''));
-      } catch {
-        reject(new Error(err.trim().split('\n').pop() || 'Claude Code returned no answer.'));
-      }
-    });
-    proc.stdin.end(prompt);
-  });
-}
-
 function summarizeInput(input) {
   if (!input || typeof input !== 'object') return '';
   const v = input.file_path || input.path || input.pattern || input.query || input.url || input.command || input.description || '';
