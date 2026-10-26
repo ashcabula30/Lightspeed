@@ -3,11 +3,11 @@
 // Only one chat answers at a time (one Claude Code process).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { ClaudeChat } from './claude.js';
+import { APP_DATA } from './paths.js';
 
-const FILE = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), '.cache'), 'EditingAssistant', 'chats.json');
+const FILE = path.join(APP_DATA, 'chats.json');
 const MAX_MESSAGES = 300; // per chat, oldest dropped first
 const NEW_TITLE = 'New chat';
 // Only Premiere tools can be allowed for a whole chat; anything else is approved one reply at a time.

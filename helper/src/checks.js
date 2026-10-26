@@ -5,10 +5,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { LOCAL_DATA } from './paths.js';
 
 export const REQUIRED_TESSERACT = '0.4.0';
 const isWin = process.platform === 'win32';
-const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+const localAppData = LOCAL_DATA;
 
 function run(cmd, args, timeoutMs = 15000) {
   return new Promise((resolve) => {
@@ -48,7 +49,7 @@ export function findWhisper() {
 async function checkWhisper() {
   const exe = findWhisper();
   const model = whisperModelPath();
-  if (!exe) return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'missing', detail: 'whisper-cli was not found.', fix: 'install-whisper' };
+  if (!exe) return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'missing', detail: `whisper-cli was not found in ${path.join(localAppData, 'whisper.cpp')}.`, fix: 'install-whisper' };
   if (!exists(model)) return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'warn', detail: 'whisper-cli found, but the small.en speech model is missing.', fix: 'download-model' };
   return { id: 'whisper', label: 'Speech engine (whisper.cpp)', state: 'ok', detail: `Ready (${path.basename(path.dirname(path.dirname(exe)))}, small.en model)`, paths: { exe, model } };
 }
@@ -74,7 +75,7 @@ function findTesseract() {
 async function checkTesseract() {
   const found = findTesseract();
   const label = 'Tesseract (motion graphics)';
-  if (!found.length) return { id: 'tesseract', label, state: 'missing', detail: 'Not installed. Motion-graphics features stay off until it is.', fix: 'install-tesseract' };
+  if (!found.length) return { id: 'tesseract', label, state: 'missing', detail: `Not found in ${isWin ? path.join(localAppData, 'Tesseract', 'public-cli') : 'the usual folders'}. Motion-graphics features stay off until it is installed.`, fix: 'install-tesseract' };
   // Prefer the pinned version when several are installed.
   for (const exe of found) {
     const r = await run(exe, ['--version']);

@@ -15,8 +15,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import WebSocket from 'ws';
 import { tesseractExe } from './checks.js';
+import { APP_DATA } from './paths.js';
 
-export const WORK_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'EditingAssistant', 'tesseract');
+export const WORK_DIR = path.join(APP_DATA, 'tesseract');
 const HELPER_URL = `ws://127.0.0.1:${process.env.EA_PORT || 7790}/panel`;
 
 // Tesseract commands the chat may run (no telemetry settings).

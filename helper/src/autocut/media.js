@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findWhisper, whisperModelPath } from '../checks.js';
+import { APP_DATA } from '../paths.js';
 
 export const FRAME_S = 0.02; // loudness frame: 20 ms
-const CACHE_DIR = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), '.cache'), 'EditingAssistant', 'cache');
+const CACHE_DIR = path.join(APP_DATA, 'cache');
 // Nudges whisper to keep disfluencies; it still drops most "um"s, which the plan finds from the audio.
 const WHISPER_PROMPT = 'Um, so, uh, I mean, like, you know, uh, I- I think we, um, we should start.';
 

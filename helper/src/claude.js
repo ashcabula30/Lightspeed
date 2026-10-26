@@ -6,10 +6,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { APP_DATA } from './paths.js';
 
 const isWin = process.platform === 'win32';
 // Last known plan usage, kept between helper restarts so the meter has numbers before any chat.
-const USAGE_FILE = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), '.cache'), 'EditingAssistant', 'usage.json');
+const USAGE_FILE = path.join(APP_DATA, 'usage.json');
 
 function loadUsage() {
   try { return JSON.parse(fs.readFileSync(USAGE_FILE, 'utf8')); } catch { return null; }
@@ -59,7 +60,7 @@ const MCP_CONFIG = JSON.stringify({ mcpServers: { 'editing-assistant': { command
 const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'mcp__editing-assistant'];
 
 // Standing notes for chats started from the panel: facts about this setup Claude can't see.
-const WORK_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'EditingAssistant', 'tesseract');
+const WORK_DIR = path.join(APP_DATA, 'tesseract');
 const PANEL_NOTES = [
   'You are running inside the Editing Assistant panel in Premiere Pro. The editor approves other tools from approval cards in the chat.',
   'All your tools come from the editing-assistant server. Premiere Pro tools are there under their usual names; ones that change the project',
