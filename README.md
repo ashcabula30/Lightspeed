@@ -1,7 +1,11 @@
+<p align="center">
+  <img src="panel/icons/logo.svg" width="128" alt="Editing Assistant logo">
+</p>
+
 # Editing Assistant
 
 ![Premiere Pro](https://img.shields.io/badge/PREMIERE_PRO-25.6%2B-9999FF?style=for-the-badge&logo=adobepremierepro&logoColor=white)
-![UXP](https://img.shields.io/badge/PLUGIN-UXP_PANEL-1473E6?style=for-the-badge)
+![UXP](https://img.shields.io/badge/PLUGIN-UXP_PANEL-4F378B?style=for-the-badge)
 ![Claude Code](https://img.shields.io/badge/AI-CLAUDE_CODE-D97757?style=for-the-badge&logo=claude&logoColor=white)
 ![Node](https://img.shields.io/badge/HELPER-NODE_20%2B-5FA04E?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![Platform](https://img.shields.io/badge/PLATFORM-WINDOWS-0078D4?style=for-the-badge)
@@ -15,7 +19,8 @@
 - ✂️ **Auto-cut:** removes silences, ums and "take again" retakes from the dialogue track. Preview every cut as a coloured marker first (delete a marker to keep that bit), then apply. A backup sequence is made first; **Stop** halts cleanly between batches and **Undo cuts** swaps the original back in.
 - 💬 **Claude chat window:** its own panel you can float or dock. Saved chats you can switch, rename and delete, with replies rendered as clean Markdown.
 - ⚡ **No approval prompts:** the chat edits the timeline, runs Tesseract and FFmpeg, and uses the shell without stopping to ask. It's told to duplicate the sequence before big changes.
-- 🎞️ **Tesseract and ffmpeg tools:** Claude can build motion graphics and retime, trim or convert clips without shell access. Work happens in locked job folders, footage is only read, and finished files are copied out without overwriting anything.
+- 🎞️ **Tesseract and FFmpeg tools:** dedicated tools for motion graphics and for retiming, trimming or converting clips. Work happens in job folders on C: (Tesseract can't save projects on exFAT drives), footage is only read, and finished files are copied out without overwriting anything.
+- 🎨 **Scrubless look:** the same Material 3 Expressive style as Scrubless, the footage finder: dark, lavender accent, rounded cards and pill buttons, with a matching logo.
 - 📋 **Client guides:** pick a client to see its fonts, on-screen text rules and must-dos, read straight from the team knowledge base.
 - 🔍 **Review:** QA checks (gaps on V1/A1, offline media, leftover cut markers), the client's must-dos as a tick list, and a handoff note to paste into ClickUp or Slack. Nothing is ever posted for you.
 - 📊 **Plan usage at a glance:** a "Claude NN%" chip with the 5-hour and weekly limits, plus a warning before you send past 85%.
@@ -40,7 +45,9 @@
 3. **Panels:** in Premiere, **Window → UXP Plugins → Editing Assistant** and **Editing Assistant Chat**.
 4. Keep the CEP panel **MCP for Adobe Premiere Pro** open; auto-cut, QA and the chat's Premiere tools go through it.
 
-The **Setup** section checks for Claude Code, Tesseract, whisper.cpp and FFmpeg and says what's missing. `npm run check` in `helper/` prints the same checklist.
+The **Setup** section checks for Claude Code, Tesseract, whisper.cpp and FFmpeg and says what's missing (with the folder it searched). `npm run check` in `helper/` prints the same checklist.
+
+**Where things are saved:** `%LOCALAPPDATA%\EditingAssistant\`: `chats.json` (your chats), `usage.json` (last plan usage), `cache\` (audio and transcripts for auto-cut) and `tesseract\` (chat job folders). The helper's own log is `helper/helper.log`.
 
 ---
 
@@ -57,6 +64,7 @@ The **Setup** section checks for Claude Code, Tesseract, whisper.cpp and FFmpeg 
 
 ```
 panel/    UXP plugin: the main panel and the chat window (two panels, one script)
+  icons/  logo.svg and the PNG icons the manifest uses
 helper/   Node helper: checks, Claude Code chats, auto-cut, QA, and the chat's tool server
 tools/    preview-server.js: serves panel/ at http://127.0.0.1:7791 to check the UI in a browser
 ```
@@ -70,5 +78,6 @@ tools/    preview-server.js: serves panel/ at http://127.0.0.1:7791 to check the
 - [x] Client guides, QA checks and handoff notes
 - [x] Chat window with saved chats, Markdown replies and Scrubless styling
 - [x] Locked-down Tesseract and FFmpeg tools for the chat
+- [x] Prompt-free chat, faster streaming and the Editing Assistant logo
 - [ ] One-click installer
 - [ ] macOS support
