@@ -6,9 +6,6 @@ import { Chats } from './chats.js';
 import { loadConfig } from './config.js';
 import { acknowledgeRecovery, call, callRaw, close as closePremiere, inspectRecovery, listTools } from './premiere.js';
 
-// Premiere tools that only look at the project; everything else asks the editor first.
-const READ_PREFIXES = ['get_', 'list_', 'verify_', 'inspect_', 'find_', 'search_', 'read_', 'check_', 'is_', 'has_'];
-const isReadTool = (t) => t === 'ping' || READ_PREFIXES.some((p) => t.startsWith(p));
 import { analyzeSequence } from './autocut/index.js';
 import { applyCuts, undoCuts } from './autocut/apply.js';
 import { clearCutMarkers, placeCutMarkers } from './autocut/markers.js';
@@ -111,10 +108,6 @@ wss.on('connection', (ws) => {
           const reply = (r) => send(ws, { type: 'premiere-call-result', id: msg.id, ...r });
           const textResult = (t) => reply({ isError: true, content: [{ type: 'text', text: t }] });
           if (jobBusy) return textResult(`Premiere is busy with ${jobBusy} from the panel. Try again when it finishes.`);
-          if (!isReadTool(tool)) {
-            const mode = await chat.requestLive(`mcp__premiere-pro__${tool}`, msg.args || {});
-            if (mode === 'deny') return textResult('The editor did not allow this change, so nothing was changed. Ask them what they would like instead.');
-          }
           try {
             const res = await callRaw(tool, msg.args || {});
             return reply({ content: res.content, isError: !!res.isError });
@@ -122,8 +115,6 @@ wss.on('connection', (ws) => {
             return textResult(String(err.message || err));
           }
         }
-        case 'chat-approve':
-          return await chat.approve(String(msg.chatId), String(msg.approvalId), ['once', 'always', 'deny'].includes(msg.mode) ? msg.mode : 'deny');
         case 'usage-check':
           try {
             await chat.checkUsage();

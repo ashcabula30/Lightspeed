@@ -6,7 +6,7 @@
 ![Node](https://img.shields.io/badge/HELPER-NODE_20%2B-5FA04E?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![Platform](https://img.shields.io/badge/PLATFORM-WINDOWS-0078D4?style=for-the-badge)
 
-> A Premiere Pro panel for short-form editors. It cuts dead air and retakes, keeps every client's rules one click away, checks an edit before handoff, and puts Claude in a chat window that can read and edit your timeline. Every change to the project asks you first.
+> A Premiere Pro panel for short-form editors. It cuts dead air and retakes, keeps every client's rules one click away, checks an edit before handoff, and puts Claude in a chat window that can read and edit your timeline. It works without approval prompts, so a quick ask gets a quick edit.
 
 ---
 
@@ -14,7 +14,7 @@
 
 - ✂️ **Auto-cut:** removes silences, ums and "take again" retakes from the dialogue track. Preview every cut as a coloured marker first (delete a marker to keep that bit), then apply. A backup sequence is made first; **Stop** halts cleanly between batches and **Undo cuts** swaps the original back in.
 - 💬 **Claude chat window:** its own panel you can float or dock. Saved chats you can switch, rename and delete, with replies rendered as clean Markdown.
-- ✅ **Approvals mid-reply:** when Claude wants to change the project, a card shows the exact edit and Claude waits for **Allow**, **Allow all Premiere edits in this chat** or **Don't allow**. Reading the project never asks.
+- ⚡ **No approval prompts:** the chat edits the timeline, runs Tesseract and FFmpeg, and uses the shell without stopping to ask. It's told to duplicate the sequence before big changes.
 - 🎞️ **Tesseract and ffmpeg tools:** Claude can build motion graphics and retime, trim or convert clips without shell access. Work happens in locked job folders, footage is only read, and finished files are copied out without overwriting anything.
 - 📋 **Client guides:** pick a client to see its fonts, on-screen text rules and must-dos, read straight from the team knowledge base.
 - 🔍 **Review:** QA checks (gaps on V1/A1, offline media, leftover cut markers), the client's must-dos as a tick list, and a handoff note to paste into ClickUp or Slack. Nothing is ever posted for you.
@@ -24,7 +24,7 @@
 
 ## 🛠️ The Technology Stack
 
-- **Panel:** [Adobe UXP](https://developer.adobe.com/premiere-pro/uxp/) (plain HTML, CSS and JavaScript, no build step), styled to match Premiere's Spectrum look
+- **Panel:** [Adobe UXP](https://developer.adobe.com/premiere-pro/uxp/) (plain HTML, CSS and JavaScript, no build step), styled after Scrubless (Material 3 Expressive, dark, lavender accent)
 - **Helper:** [Node.js](https://nodejs.org/) with [ws](https://github.com/websockets/ws), listening on `127.0.0.1` only
 - **AI:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) run headless on your own Claude plan, with tools served over the [Model Context Protocol](https://modelcontextprotocol.io/)
 - **Premiere control:** [premiere-pro-mcp](https://premiere-pro-mcp.com/) through one long-lived connection shared by auto-cut, QA and the chat
@@ -47,9 +47,9 @@ The **Setup** section checks for Claude Code, Tesseract, whisper.cpp and FFmpeg 
 ## 🔒 Safety by Design
 
 - The helper only listens on `127.0.0.1`; nothing outside your computer can reach it.
-- Chat tools that write files are confined to job folders under `%LOCALAPPDATA%\EditingAssistant\tesseract`, and `copy_out` never overwrites.
-- Premiere edits from the chat always show an approval card; auto-cut always makes a backup sequence first.
-- Shell commands (Bash, PowerShell) are never allowed without your approval.
+- The panel's Tesseract and FFmpeg tools write only to job folders under `%LOCALAPPDATA%\EditingAssistant\tesseract`, and `copy_out` never overwrites (Claude can still use the shell directly).
+- Auto-cut always makes a backup sequence first, and Undo cuts puts it back.
+- The chat runs without approval prompts (your choice): use it on project files you have backups of.
 
 ---
 
@@ -68,7 +68,7 @@ tools/    preview-server.js: serves panel/ at http://127.0.0.1:7791 to check the
 - [x] Setup checklist, Claude Code chat and usage meter
 - [x] Auto-cut with marker preview, Stop and Undo cuts
 - [x] Client guides, QA checks and handoff notes
-- [x] Chat window with saved chats, live approvals and native Premiere styling
+- [x] Chat window with saved chats, Markdown replies and Scrubless styling
 - [x] Locked-down Tesseract and FFmpeg tools for the chat
 - [ ] One-click installer
 - [ ] macOS support

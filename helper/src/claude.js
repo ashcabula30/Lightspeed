@@ -54,21 +54,15 @@ export function findClaudeExecutable() {
 // The panel's own tool server (tools-mcp.js): Tesseract and media tools locked to job folders on C:.
 const TOOLS_SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'tools-mcp.js');
 const MCP_CONFIG = JSON.stringify({ mcpServers: { 'editing-assistant': { command: process.execPath, args: [TOOLS_SERVER] } } });
-// Tools Claude may use without asking: reading, and the whole editing-assistant server. Its local
-// tools are locked down, and its Premiere tools ask the editor through a live card for any change
-// (the helper does that, mid-reply). Anything else (Bash, PowerShell, Write) needs an approval card.
-const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'mcp__editing-assistant'];
 
 // Standing notes for chats started from the panel: facts about this setup Claude can't see.
 const WORK_DIR = path.join(APP_DATA, 'tesseract');
 const PANEL_NOTES = [
-  'You are running inside the Editing Assistant panel in Premiere Pro. The editor approves other tools from approval cards in the chat.',
-  'All your tools come from the editing-assistant server. Premiere Pro tools are there under their usual names; ones that change the project',
-  'show the editor an approval card and wait for the answer inside the same tool call, so just call them and continue with the result',
-  '(if the editor says no, nothing changed: ask what they want instead). Do not try to acknowledge Premiere safety checks yourself unless asked.',
-  'For media work use the local tools, which run without approval: tesseract (runs tsrct in a job folder), ffmpeg (trim, retime, strip audio, convert),',
-  'write_job_file (e.g. edited document JSON for "project commit --file"), list_job, media_info (ffprobe), grab_frame (a PNG you can Read),',
-  'and copy_out (puts a finished file next to the footage without overwriting). Use them instead of Bash or PowerShell, and reuse one job name per piece of work.',
+  'You are running inside the Editing Assistant panel in Premiere Pro. Tools run without approval prompts, so act carefully:',
+  'before a large or risky timeline change, duplicate the sequence as a backup. Premiere Pro tools come from the editing-assistant server under their usual names.',
+  'Do not acknowledge Premiere safety checks yourself unless asked. For media work prefer the local tools: tesseract (runs tsrct in a job folder),',
+  'ffmpeg (trim, retime, strip audio, convert), write_job_file (e.g. edited document JSON for "project commit --file"), list_job, media_info (ffprobe),',
+  'grab_frame (a PNG you can Read) and copy_out (puts a finished file next to the footage without overwriting). Reuse one job name per piece of work.',
   `Job folders live in ${WORK_DIR} on C:. Never put .tsrct projects on the E: drive: it is exFAT, and Tesseract fails there with "Access is denied" on every save after the first.`,
 ].join(' ');
 
@@ -139,18 +133,18 @@ export class ClaudeChat {
     }
   }
 
-  // extraTools: tools the editor approved for this reply, on top of the read-only set.
-  async send(text, extraTools = []) {
+  async send(text) {
     if (this.proc) throw new Error('Claude is still answering the previous message.');
     const exe = await findClaudeExecutable();
     if (!exe) throw new Error('Claude Code was not found. Install it and sign in, then refresh the setup checklist.');
 
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
       '--append-system-prompt', PANEL_NOTES, '--mcp-config', MCP_CONFIG, '--strict-mcp-config',
-      '--allowedTools', ...READ_ONLY_TOOLS, ...extraTools];
+      // Ash's call (2026-10-28): no approval prompts in panel chats, Bash and Premiere edits included.
+      '--permission-mode', 'bypassPermissions'];
     if (this.sessionId) args.push('--resume', this.sessionId);
 
-    // A Premiere edit can wait on the editor's approval card, so give tool calls up to 30 minutes.
+    // Tesseract exports and Premiere jobs can be long: give tool calls up to 30 minutes.
     const env = { ...process.env, MCP_TOOL_TIMEOUT: String(30 * 60 * 1000) };
     const proc = spawn(exe, args, { cwd: this.workdir, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc = proc;
@@ -181,8 +175,7 @@ export class ClaudeChat {
       if (result) {
         if (result.session_id) this.sessionId = result.session_id;
         this.onEvent({ type: 'chat-done', isError: !!result.is_error, error: result.is_error ? result.result : null,
-          durationMs: result.duration_ms, denied: (result.permission_denials || []).map((d) => d.tool_name),
-          deniedDetails: (result.permission_denials || []).map((d) => ({ tool: d.tool_name, input: summarizeInput(d.tool_input) || briefJson(d.tool_input) })) });
+          durationMs: result.duration_ms });
       } else {
         this.onEvent({ type: 'chat-error', error: code === null ? 'Stopped.' : (stderr.trim().split('\n').pop() || `Claude Code exited with code ${code}.`) });
       }
@@ -218,10 +211,6 @@ export class ClaudeChat {
         break;
     }
   }
-}
-
-function briefJson(input) {
-  try { return JSON.stringify(input || {}).slice(0, 160); } catch { return ''; }
 }
 
 function summarizeInput(input) {

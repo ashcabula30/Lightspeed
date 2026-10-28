@@ -81,7 +81,7 @@ function setSwitch(row, on) {
   setClass(row, 'on', on);
   setClass(row.querySelector('.switch'), 'switch-on', on);
   setClass(row.querySelector('.knob'), 'knob-on', on);
-  row.querySelector('.knob').textContent = on ? '✓' : ''; // drawn as a Spectrum checkbox
+  row.querySelector('.knob').textContent = on ? '✓' : ''; // M3 switch handle shows a check when on
 }
 // Spectrum fields in Premiere can report null until edited, so reads fall back to the
 // starting value and writes set both the property and the attribute.
@@ -127,6 +127,7 @@ function useSpectrumFields() {
     field.id = old.id;
     field.className = isArea ? `sp-input sp-area ${old.className.replace(/\binput\b/, '')}` : 'sp-input';
     if (old.getAttribute('placeholder')) field.setAttribute('placeholder', old.getAttribute('placeholder'));
+    field.setAttribute('quiet', ''); // no box of its own: it sits on the filled container
     old.parentElement.replaceChild(field, old);
     if (old.value) { field.setAttribute('value', old.value); field.value = old.value; }
   });
@@ -393,68 +394,26 @@ function addMessage(kind, text) {
   return body;
 }
 
+// Streaming sends many small deltas; re-rendering the whole reply on each one gets slow on long
+// replies, so redraws are batched to at most one every 50 ms (and flushed when the reply ends).
+let renderTimer = null;
+let renderTarget = null;
+function drawReply(body) {
+  body.innerHTML = '';
+  body.appendChild(renderMarkdown(body.mdRaw));
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+function flushReply() {
+  if (renderTimer) clearTimeout(renderTimer);
+  renderTimer = null;
+  if (renderTarget) drawReply(renderTarget);
+  renderTarget = null;
+}
 function setReplyText(body, text) {
   body.mdRaw = text;
-  body.innerHTML = '';
-  body.appendChild(renderMarkdown(text));
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-// ---------- approvals ----------
-// Claude asked for a tool it isn't allowed yet: show what it wanted and let the editor decide.
-const approvalCards = {}; // approval id -> its card on screen
-const RESOLVED_TEXT = { once: 'Allowed.', always: 'Allowed for the rest of this chat.', deny: 'Not allowed.' };
-
-function resolveApprovalCard(card, mode) {
-  const actions = card.querySelector('.approval-actions');
-  if (actions) card.removeChild(actions);
-  const done = document.createElement('div');
-  done.className = `approval-done${mode === 'deny' ? ' approval-denied' : ''}`;
-  done.textContent = RESOLVED_TEXT[mode] || '';
-  card.appendChild(done);
-}
-
-function addApproval(m) {
-  const empty = messagesEl.querySelector('.empty');
-  if (empty) messagesEl.removeChild(empty);
-  const a = m.approval;
-  const card = document.createElement('div');
-  card.className = 'msg approval';
-  approvalCards[a.id] = card;
-  const title = document.createElement('div');
-  title.className = 'approval-title';
-  title.textContent = m.text;
-  card.appendChild(title);
-  for (const d of a.details || []) {
-    if (!d.input) continue;
-    const line = document.createElement('div');
-    line.className = 'approval-detail';
-    line.textContent = d.input;
-    card.appendChild(line);
-  }
-  if (a.resolved) {
-    resolveApprovalCard(card, a.resolved);
-  } else {
-    const actions = document.createElement('div');
-    actions.className = 'approval-actions';
-    const button = (label, cls, mode) => {
-      const b = document.createElement('div');
-      b.className = `btn btn-small ${cls}`;
-      b.textContent = label;
-      onClick(b, () => {
-        // A live card is answered while Claude waits for it; an after-reply card starts a new reply.
-        if (!a.live && mode !== 'deny' && busy) return;
-        request('chat-approve', { chatId: currentChatId, approvalId: a.id, mode });
-      });
-      actions.appendChild(b);
-    };
-    button(a.live ? 'Allow' : 'Allow and continue', 'btn-primary', 'once');
-    if (a.canAlways) button(a.live ? 'Allow all Premiere edits in this chat' : 'Always allow in this chat', 'btn-secondary', 'always');
-    button("Don't allow", 'btn-ghost', 'deny');
-    card.appendChild(actions);
-  }
-  messagesEl.appendChild(card);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (renderTarget && renderTarget !== body) flushReply();
+  renderTarget = body;
+  if (!renderTimer) renderTimer = setTimeout(flushReply, 50);
 }
 
 // Check asks the helper for fresh numbers (one tiny request on Claude's cheapest model).
@@ -543,13 +502,13 @@ function openChat(chat, isBusy) {
   messagesEl.innerHTML = '';
   if (!chat.messages.length) messagesEl.innerHTML = `<div class="empty">${EMPTY_CHAT}</div>`;
   for (const m of chat.messages) {
-    if (m.kind === 'approval') addApproval(m);
-    else addMessage(m.kind, m.text);
+    addMessage(m.kind === 'approval' ? 'note' : m.kind, m.text); // old chats can hold approval cards
   }
   // Text arriving for a reply that's already streaming continues its last message.
   if (isBusy && chat.messages.length && chat.messages[chat.messages.length - 1].kind === 'assistant') {
     currentReply = messagesEl.lastChild && messagesEl.lastChild.querySelector('.msg-body');
   }
+  flushReply();
   activityEl.textContent = isBusy ? 'Replying…' : '';
   renderChatList();
   updateControls();
@@ -607,6 +566,7 @@ function handleRecovery(msg) {
 }
 
 function handleChatEvent(msg) {
+  if (msg.type !== 'chat-delta') flushReply(); // anything but more text: show the reply so far
   switch (msg.type) {
     case 'chat-user':
       addMessage('user', msg.text);
@@ -627,19 +587,10 @@ function handleChatEvent(msg) {
       currentReply = null;
       break;
     case 'chat-done':
-      // Blocked tools arrive separately as an approval card (chat-approval).
       if (msg.isError) addMessage('error', msg.error || 'Claude reported an error.');
       currentReply = null;
       setBusyChat(null);
       break;
-    case 'chat-approval':
-      addApproval(msg.message);
-      break;
-    case 'chat-approval-resolved': {
-      const card = approvalCards[msg.approvalId];
-      if (card) resolveApprovalCard(card, msg.mode);
-      break;
-    }
     case 'chat-error':
       addMessage('error', msg.error);
       currentReply = null;
@@ -704,8 +655,6 @@ function handleMessage(msg) {
     case 'chat-tool':
     case 'chat-done':
     case 'chat-error':
-    case 'chat-approval':
-    case 'chat-approval-resolved':
       if (msg.chatId && msg.chatId !== currentChatId) {
         if (msg.type === 'chat-done' || msg.type === 'chat-error') setBusyChat(null);
         break;

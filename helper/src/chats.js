@@ -10,22 +10,12 @@ import { APP_DATA } from './paths.js';
 const FILE = path.join(APP_DATA, 'chats.json');
 const MAX_MESSAGES = 300; // per chat, oldest dropped first
 const NEW_TITLE = 'New chat';
-// Only Premiere tools can be allowed for a whole chat; anything else is approved one reply at a time.
-const ALWAYS_OK = /^mcp__premiere-pro__/;
-
-export const toolLabel = (t) => t.replace(/^mcp__premiere-pro__/, 'Premiere: ').replace(/^mcp__editing-assistant__/, '').replace(/^mcp__([^_]+)__/, '$1: ');
-
-function briefInput(input) {
-  try { return JSON.stringify(input || {}).slice(0, 220); } catch { return ''; }
-}
-
 export class Chats {
   constructor({ workdir, onEvent }) {
     this.onEvent = onEvent;
     this.chats = this.load();
     this.answering = null;  // id of the chat Claude is replying in
     this.openReply = false; // whether the next text delta continues the last assistant message
-    this.live = new Map();  // live approval id -> resolve(mode)
     this.claude = new ClaudeChat({ workdir, onEvent: (ev) => this.fromClaude(ev) });
   }
 
@@ -64,7 +54,7 @@ export class Chats {
 
   create() {
     const now = Date.now();
-    const chat = { id: crypto.randomUUID(), title: NEW_TITLE, sessionId: null, allowedTools: [], createdAt: now, updatedAt: now, messages: [] };
+    const chat = { id: crypto.randomUUID(), title: NEW_TITLE, sessionId: null, createdAt: now, updatedAt: now, messages: [] };
     this.chats.push(chat);
     this.save();
     this.listChanged();
@@ -91,8 +81,7 @@ export class Chats {
     chat.updatedAt = Date.now();
   }
 
-  // allowOnce: tools the editor approved for this one reply.
-  async send(id, text, allowOnce = []) {
+  async send(id, text) {
     if (this.claude.busy) throw new Error('Claude is still answering in another chat. Wait for it, or press Stop.');
     const chat = this.get(id);
     if (chat.title === NEW_TITLE) chat.title = text.replace(/\s+/g, ' ').slice(0, 48) + (text.length > 48 ? '…' : '');
@@ -104,7 +93,7 @@ export class Chats {
     this.onEvent({ type: 'chat-user', chatId: id, text });
     this.listChanged();
     try {
-      await this.claude.send(text, [...(chat.allowedTools || []), ...allowOnce]);
+      await this.claude.send(text);
     } catch (err) {
       this.finish(chat, 'error', err.message);
       throw err;
@@ -112,51 +101,7 @@ export class Chats {
   }
 
   stop() {
-    // A reply waiting on a live approval can't continue once stopped.
-    for (const [id, resolve] of this.live) { this.live.delete(id); resolve('deny'); }
     this.claude.stop();
-  }
-
-  // Live approval for a Premiere edit Claude is making right now: the tool call waits for the
-  // editor's answer ('once', 'always' or 'deny') instead of ending the reply.
-  requestLive(tool, input) {
-    const chat = this.answering && this.chats.find((c) => c.id === this.answering);
-    if (!chat) return Promise.resolve('deny');
-    if (chat.allowPremiereEdits) return Promise.resolve('always');
-    const card = { id: crypto.randomUUID(), tools: [tool], details: [{ tool, input: briefInput(input) }], resolved: null, canAlways: true, live: true };
-    this.push(chat, 'approval', `Claude wants to change the project: ${toolLabel(tool)}.`, { approval: card });
-    this.openReply = false;
-    this.save();
-    this.onEvent({ type: 'chat-approval', chatId: chat.id, message: chat.messages[chat.messages.length - 1] });
-    return new Promise((resolve) => this.live.set(card.id, resolve));
-  }
-
-  // mode: 'once' (this reply), 'always' (Premiere tools, for the rest of this chat) or 'deny'.
-  async approve(id, approvalId, mode) {
-    const chat = this.get(id);
-    const msg = chat.messages.find((m) => m.approval && m.approval.id === approvalId);
-    if (!msg) throw new Error('That approval is no longer in this chat.');
-    if (msg.approval.resolved) throw new Error('That approval was already answered.');
-    if (mode === 'always' && !msg.approval.canAlways) throw new Error('Only Premiere tools can be allowed for the whole chat.');
-    if (msg.approval.live) {
-      const resolve = this.live.get(approvalId);
-      msg.approval.resolved = resolve ? mode : 'deny';
-      if (mode === 'always' && resolve) chat.allowPremiereEdits = true;
-      this.save();
-      this.onEvent({ type: 'chat-approval-resolved', chatId: id, approvalId, mode: msg.approval.resolved });
-      if (resolve) { this.live.delete(approvalId); resolve(mode); }
-      return;
-    }
-    if (mode !== 'deny' && this.claude.busy) throw new Error('Claude is answering in another chat. Wait for it, or press Stop.');
-    msg.approval.resolved = mode;
-    this.onEvent({ type: 'chat-approval-resolved', chatId: id, approvalId, mode });
-    if (mode === 'deny') {
-      this.save();
-      return;
-    }
-    const tools = msg.approval.tools;
-    if (mode === 'always') chat.allowedTools = [...new Set([...(chat.allowedTools || []), ...tools])];
-    await this.send(id, `Approved: go ahead with ${tools.map(toolLabel).join(', ')}.`, tools);
   }
 
   finish(chat, kind, text) {
@@ -188,15 +133,7 @@ export class Chats {
         break;
       case 'chat-done': {
         this.onEvent({ ...ev, chatId });
-        const denied = (ev.denied || []).filter((d, i, a) => a.indexOf(d) === i);
         if (ev.isError) this.push(chat, 'error', ev.error || 'Claude reported an error.');
-        if (denied.length) {
-          // An approval card: the editor can allow the blocked tools and let Claude carry on.
-          const card = { id: crypto.randomUUID(), tools: denied, details: ev.deniedDetails || [], resolved: null,
-            canAlways: denied.every((t) => ALWAYS_OK.test(t)) };
-          this.push(chat, 'approval', `Claude needs your OK to use ${denied.map(toolLabel).join(', ')}.`, { approval: card });
-          this.onEvent({ type: 'chat-approval', chatId, message: chat.messages[chat.messages.length - 1] });
-        }
         this.finish(chat, null, null);
         return;
       }
