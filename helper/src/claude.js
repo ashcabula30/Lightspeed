@@ -35,7 +35,14 @@ function parseUsage(ev) {
 }
 
 // Find the real claude executable so the user's text never passes through a shell.
+// Looked up once per helper run (~100 ms each time otherwise); a miss is retried next call.
+let exePromise = null;
 export function findClaudeExecutable() {
+  if (!exePromise) exePromise = lookupClaude().then((exe) => { if (!exe) exePromise = null; return exe; });
+  return exePromise;
+}
+
+function lookupClaude() {
   return new Promise((resolve) => {
     execFile(isWin ? 'where' : 'which', ['claude'], { windowsHide: true }, (err, stdout) => {
       const hits = String(stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -72,6 +79,10 @@ export class ClaudeChat {
     this.onEvent = onEvent;
     this.sessionId = null;
     this.proc = null;
+    this.procSession = null; // the conversation the live process is on
+    this.procFor = null;
+    this.turnActive = false;
+    this.idleTimer = null;
     this.lastUsage = loadUsage();
     this.checking = null;
   }
@@ -119,26 +130,30 @@ export class ClaudeChat {
     return this.checking;
   }
 
-  get busy() { return !!this.proc; }
-
-  reset() {
-    this.stop();
-    this.sessionId = null;
-  }
+  // One Claude Code process stays alive per chat and takes messages over stdin (stream-json), so
+  // its ~5 s session setup (hooks, plugins, settings) is paid once per chat, not once per message.
+  // It is started when a chat opens (warm), closed after 10 idle minutes, and restarted after Stop.
+  get busy() { return this.turnActive; }
 
   stop() {
-    if (this.proc) {
-      this.proc.kill();
-      this.proc = null;
-    }
+    if (this.proc) this.proc.kill(); // the close handler reports "Stopped." for a reply in progress
   }
 
-  async send(text) {
-    if (this.proc) throw new Error('Claude is still answering the previous message.');
+  // Start the process for this session ahead of the first message (no-op while a reply runs).
+  async warm(sessionId) {
+    if (this.turnActive) return;
+    this.sessionId = sessionId || null;
+    try { await this.ensureProc(); } catch (err) { console.error('[helper] could not pre-start Claude Code:', err.message); }
+  }
+
+  async ensureProc() {
+    // Reuse when it's this conversation, or when it's a fresh warm process and this is a new chat.
+    if (this.proc && (this.sessionId === this.procSession || this.sessionId === this.procFor)) return this.proc;
+    if (this.proc) { this.proc.kill(); this.proc = null; } // another chat's conversation
     const exe = await findClaudeExecutable();
     if (!exe) throw new Error('Claude Code was not found. Install it and sign in, then refresh the setup checklist.');
 
-    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
       '--append-system-prompt', PANEL_NOTES, '--mcp-config', MCP_CONFIG, '--strict-mcp-config',
       // Ash's call (2026-10-28): no approval prompts in panel chats, Bash and Premiere edits included.
       '--permission-mode', 'bypassPermissions'];
@@ -148,14 +163,10 @@ export class ClaudeChat {
     const env = { ...process.env, MCP_TOOL_TIMEOUT: String(30 * 60 * 1000) };
     const proc = spawn(exe, args, { cwd: this.workdir, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.proc = proc;
-    // The prompt goes in on stdin, never as a command-line argument.
-    proc.stdin.end(text);
-
+    this.procSession = this.sessionId;
+    this.procFor = this.sessionId; // what it was started for (null = a new chat), until its first reply
     let buffer = '';
     let stderr = '';
-    // The final result arrives before the process exits (hooks still run), so hold
-    // "done" until exit; otherwise the next message could overlap this session.
-    let result = null;
     proc.stdout.on('data', (chunk) => {
       buffer += chunk;
       let nl;
@@ -165,25 +176,54 @@ export class ClaudeChat {
         if (!line) continue;
         let ev;
         try { ev = JSON.parse(line); } catch { continue; }
-        if (ev.type === 'result') result = ev;
+        if (this.proc !== proc) continue; // output from a process being replaced
+        if (ev.session_id) { this.sessionId = ev.session_id; this.procSession = ev.session_id; }
+        if (ev.type === 'result') this.finishTurn(ev);
         else this.handle(ev);
       }
     });
-    proc.stderr.on('data', (chunk) => { stderr += chunk; });
+    proc.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-4000); });
     proc.on('close', (code) => {
-      if (this.proc === proc) this.proc = null;
-      if (result) {
-        if (result.session_id) this.sessionId = result.session_id;
-        this.onEvent({ type: 'chat-done', isError: !!result.is_error, error: result.is_error ? result.result : null,
-          durationMs: result.duration_ms });
-      } else {
+      if (this.proc !== proc) return;
+      this.proc = null;
+      clearTimeout(this.idleTimer);
+      if (this.turnActive) {
+        this.turnActive = false;
         this.onEvent({ type: 'chat-error', error: code === null ? 'Stopped.' : (stderr.trim().split('\n').pop() || `Claude Code exited with code ${code}.`) });
       }
     });
     proc.on('error', (err) => {
-      if (this.proc === proc) this.proc = null;
-      this.onEvent({ type: 'chat-error', error: `Could not start Claude Code: ${err.message}` });
+      if (this.proc !== proc) return;
+      this.proc = null;
+      if (this.turnActive) {
+        this.turnActive = false;
+        this.onEvent({ type: 'chat-error', error: `Could not start Claude Code: ${err.message}` });
+      }
     });
+    return proc;
+  }
+
+  finishTurn(result) {
+    if (!this.turnActive) return;
+    this.turnActive = false;
+    this.procFor = this.procSession; // now it belongs to this conversation only
+    this.onEvent({ type: 'chat-done', isError: !!result.is_error, error: result.is_error ? result.result : null, durationMs: result.duration_ms });
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => { if (!this.turnActive) this.stop(); }, 10 * 60 * 1000);
+  }
+
+  async send(text) {
+    if (this.turnActive) throw new Error('Claude is still answering the previous message.');
+    this.turnActive = true;
+    clearTimeout(this.idleTimer);
+    try {
+      const proc = await this.ensureProc();
+      // The prompt goes in on stdin as one JSON line, never as a command-line argument.
+      proc.stdin.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`);
+    } catch (err) {
+      this.turnActive = false;
+      throw err;
+    }
   }
 
   handle(ev) {

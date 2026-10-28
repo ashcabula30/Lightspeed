@@ -73,17 +73,20 @@ async function runJob(kind, prefix, job) {
 }
 
 // What the editor is looking at, sent along with each chat message so "this clip" just works.
-// Best effort: skipped while a Premiere job runs, and given up on after 3 seconds.
+// Best effort: skipped while a Premiere job runs, given up on after 1.5 s, and not retried for a
+// minute after a failure, so a closed Premiere doesn't slow every message down.
+let contextFailedAt = 0;
 async function premiereContext() {
-  if (jobBusy) return '';
+  if (jobBusy || Date.now() - contextFailedAt < 60000) return '';
   try {
-    const s = await Promise.race([call('get_premiere_state'), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 3000))]);
+    const s = await Promise.race([call('get_premiere_state'), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 1500))]);
     const seq = s.activeSequence;
     if (!seq) return 'Premiere right now: no sequence is open.';
     const sel = (s.selectedClips || []).map((c) => `"${c.name}" (node ${c.nodeId})`).join(', ');
     return `Premiere right now: active sequence "${seq.name}" (id ${seq.id}), playhead at ${Number(s.playheadSeconds || 0).toFixed(2)}s, `
       + (sel ? `selected clips: ${sel}.` : 'no clips selected.');
   } catch {
+    contextFailedAt = Date.now();
     return '';
   }
 }
@@ -112,11 +115,13 @@ wss.on('connection', (ws) => {
           return send(ws, { type: 'chats', chats: chat.summary(), busyChatId: chat.busyChatId });
         case 'chat-open': {
           const c = chat.get(String(msg.chatId));
-          return send(ws, { type: 'chat-opened', chat: { id: c.id, title: c.title, messages: c.messages }, busy: chat.busyChatId === c.id });
+          send(ws, { type: 'chat-opened', chat: { id: c.id, title: c.title, messages: c.messages }, busy: chat.busyChatId === c.id });
+          return chat.warm(c.id);
         }
         case 'chat-create': {
           const c = chat.create();
-          return send(ws, { type: 'chat-opened', chat: { id: c.id, title: c.title, messages: [] }, busy: false });
+          send(ws, { type: 'chat-opened', chat: { id: c.id, title: c.title, messages: [] }, busy: false });
+          return chat.warm(c.id);
         }
         case 'chat-rename':
           return chat.rename(String(msg.chatId), msg.title);
@@ -247,7 +252,12 @@ wss.on('connection', (ws) => {
   ws.on('close', () => console.log(`[helper] panel disconnected (${wss.clients.size} open)`));
 });
 
-wss.on('listening', () => console.log(`[helper] Editing Assistant helper ${VERSION} listening on ws://127.0.0.1:${PORT}/panel (Claude works in ${config.workdir})`));
+wss.on('listening', () => {
+  console.log(`[helper] Editing Assistant helper ${VERSION} listening on ws://127.0.0.1:${PORT}/panel (Claude works in ${config.workdir})`);
+  // Start the Premiere connector and cache its tool list now: chats need the list before their first
+  // reply, and starting the connector (npx) takes several seconds.
+  listTools().catch((err) => console.error('[helper] Premiere connector not ready yet:', err.message));
+});
 wss.on('error', (err) => {
   if (err.code === 'EADDRINUSE') console.error(`[helper] Port ${PORT} is busy. Is another helper already running?`);
   else console.error('[helper] server error:', err);

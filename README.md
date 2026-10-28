@@ -17,7 +17,7 @@
 ## ✨ Features Highlight
 
 - ✂️ **Auto-cut:** removes silences, ums and "take again" retakes from the dialogue track you pick (A1 to A8), including sped-up or slowed clips. Preview every cut as a coloured marker first (delete a marker to keep that bit), then apply. A backup sequence is made first; **Stop** halts cleanly between batches and **Undo cuts** swaps the original back in, even after the helper restarts.
-- 💬 **Claude chat window:** its own panel you can float or dock. Saved chats you can switch, rename and delete, with replies rendered as clean Markdown. Each message tells Claude the open sequence, the playhead and the selected clips, so "extend this clip" just works.
+- 💬 **Claude chat window:** its own panel you can float or dock. Saved chats you can switch, rename and delete, with replies rendered as clean Markdown. Each message tells Claude the open sequence, the playhead and the selected clips, so "extend this clip" just works. Each chat keeps one Claude Code session running and starts it when you open the chat, so replies begin in about 1-2 seconds.
 - ⚡ **No approval prompts:** the chat edits the timeline, runs Tesseract and FFmpeg, and uses the shell without stopping to ask. It's told to duplicate the sequence before big changes.
 - 🎞️ **Tesseract and FFmpeg tools:** dedicated tools for motion graphics and for retiming, trimming or converting clips. Work happens in job folders on C: (Tesseract can't save projects on exFAT drives), footage is only read, and finished files are copied out without overwriting anything.
 - 🎨 **Scrubless look:** the same Material 3 Expressive style as Scrubless, the footage finder: dark, lavender accent, rounded cards and pill buttons, with a matching logo.

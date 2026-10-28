@@ -81,6 +81,13 @@ export class Chats {
     chat.updatedAt = Date.now();
   }
 
+  // Start Claude Code for this chat in the background, so the first message doesn't wait for setup.
+  warm(id) {
+    if (this.claude.busy) return;
+    const chat = this.chats.find((c) => c.id === id);
+    if (chat) this.claude.warm(chat.sessionId);
+  }
+
   // context: what Premiere shows right now; Claude gets it, the chat history keeps only your text.
   async send(id, text, context = '') {
     if (this.claude.busy) throw new Error('Claude is still answering in another chat. Wait for it, or press Stop.');
