@@ -1,8 +1,11 @@
 // Editing Assistant helper: a local WebSocket server the Premiere panel connects to.
 // Listens on 127.0.0.1 only, so nothing outside this computer can reach it.
+import fs from 'node:fs';
+import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { runChecks } from './checks.js';
 import { Chats } from './chats.js';
+import { APP_DATA } from './paths.js';
 import { loadConfig } from './config.js';
 import { acknowledgeRecovery, call, callRaw, close as closePremiere, inspectRecovery, listTools } from './premiere.js';
 
@@ -29,8 +32,17 @@ function broadcast(msg) {
 // Saved chats shared by every open panel; each keeps its own Claude Code conversation.
 const chat = new Chats({ workdir: config.workdir, onEvent: broadcast });
 
-// What this session has done, for Apply, Restore and the handoff draft.
+// What this session has done, for Apply, Undo cuts and the handoff draft. The last applied auto-cut
+// and its backup are kept on disk, so Undo cuts still works after the helper restarts.
+const SESSION_FILE = path.join(APP_DATA, 'autocut-session.json');
 const session = { analysis: null, applied: null, backup: null, qa: null };
+try { Object.assign(session, JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'))); } catch { /* nothing saved yet */ }
+function saveSession() {
+  try {
+    fs.mkdirSync(APP_DATA, { recursive: true });
+    fs.writeFileSync(SESSION_FILE, JSON.stringify({ applied: session.applied, backup: session.backup }));
+  } catch (err) { console.error('[helper] could not save the auto-cut session:', err.message); }
+}
 
 // Premiere jobs run one at a time (they share the active sequence, playhead and undo history).
 let jobBusy = null;
@@ -60,11 +72,28 @@ async function runJob(kind, prefix, job) {
   }
 }
 
+// What the editor is looking at, sent along with each chat message so "this clip" just works.
+// Best effort: skipped while a Premiere job runs, and given up on after 3 seconds.
+async function premiereContext() {
+  if (jobBusy) return '';
+  try {
+    const s = await Promise.race([call('get_premiere_state'), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 3000))]);
+    const seq = s.activeSequence;
+    if (!seq) return 'Premiere right now: no sequence is open.';
+    const sel = (s.selectedClips || []).map((c) => `"${c.name}" (node ${c.nodeId})`).join(', ');
+    return `Premiere right now: active sequence "${seq.name}" (id ${seq.id}), playhead at ${Number(s.playheadSeconds || 0).toFixed(2)}s, `
+      + (sel ? `selected clips: ${sel}.` : 'no clips selected.');
+  } catch {
+    return '';
+  }
+}
+
 const progress = (prefix) => (p) => broadcast({ type: `${prefix}-progress`, ...(typeof p === 'string' ? { label: p } : p) });
 
 wss.on('connection', (ws) => {
   console.log(`[helper] panel connected (${wss.clients.size} open)`);
-  send(ws, { type: 'hello', helperVersion: VERSION, workdir: config.workdir, busyChatId: chat.busyChatId, jobBusy });
+  send(ws, { type: 'hello', helperVersion: VERSION, workdir: config.workdir, busyChatId: chat.busyChatId, jobBusy,
+    undo: session.backup ? { backup: session.backup.name, of: session.backup.of.name } : null });
   if (chat.lastUsage) send(ws, { type: 'usage', usage: chat.lastUsage });
   send(ws, { type: 'chats', chats: chat.summary(), busyChatId: chat.busyChatId });
 
@@ -96,7 +125,7 @@ wss.on('connection', (ws) => {
         case 'chat-send': {
           const text = String(msg.text || '').trim();
           if (!text) return;
-          return await chat.send(String(msg.chatId), text);
+          return await chat.send(String(msg.chatId), text, await premiereContext());
         }
         case 'chat-stop':
           return chat.stop();
@@ -158,6 +187,7 @@ wss.on('connection', (ws) => {
             const result = await applyCuts(analysis, progress('autocut'), jobAbort.signal);
             session.applied = { ...result, sequence: analysis.sequence };
             if (result.backup) session.backup = { ...result.backup, of: analysis.sequence };
+            saveSession();
             broadcast({ type: 'autocut-applied', result });
           });
         case 'autocut-stop':
@@ -165,10 +195,11 @@ wss.on('connection', (ws) => {
           return broadcast({ type: 'autocut-progress', label: 'Stopping after the current step…' });
         case 'autocut-undo':
           return await runJob('undoing the cuts', 'autocut', async () => {
-            if (!session.backup) throw new Error('No auto-cut to undo in this session (the helper only remembers cuts made since it started).');
+            if (!session.backup) throw new Error('There is no auto-cut to undo.');
             const result = await undoCuts(session.backup);
             session.backup = null;
             session.applied = null;
+            saveSession();
             broadcast({ type: 'autocut-undone', result });
           });
         case 'recovery-check':

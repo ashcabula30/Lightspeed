@@ -81,7 +81,8 @@ export class Chats {
     chat.updatedAt = Date.now();
   }
 
-  async send(id, text) {
+  // context: what Premiere shows right now; Claude gets it, the chat history keeps only your text.
+  async send(id, text, context = '') {
     if (this.claude.busy) throw new Error('Claude is still answering in another chat. Wait for it, or press Stop.');
     const chat = this.get(id);
     if (chat.title === NEW_TITLE) chat.title = text.replace(/\s+/g, ' ').slice(0, 48) + (text.length > 48 ? '…' : '');
@@ -93,7 +94,9 @@ export class Chats {
     this.onEvent({ type: 'chat-user', chatId: id, text });
     this.listChanged();
     try {
-      await this.claude.send(text);
+      await this.claude.send(context ? `${text}
+
+[${context}]` : text);
     } catch (err) {
       this.finish(chat, 'error', err.message);
       throw err;

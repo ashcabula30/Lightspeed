@@ -16,13 +16,13 @@
 
 ## ✨ Features Highlight
 
-- ✂️ **Auto-cut:** removes silences, ums and "take again" retakes from the dialogue track. Preview every cut as a coloured marker first (delete a marker to keep that bit), then apply. A backup sequence is made first; **Stop** halts cleanly between batches and **Undo cuts** swaps the original back in.
-- 💬 **Claude chat window:** its own panel you can float or dock. Saved chats you can switch, rename and delete, with replies rendered as clean Markdown.
+- ✂️ **Auto-cut:** removes silences, ums and "take again" retakes from the dialogue track you pick (A1 to A8), including sped-up or slowed clips. Preview every cut as a coloured marker first (delete a marker to keep that bit), then apply. A backup sequence is made first; **Stop** halts cleanly between batches and **Undo cuts** swaps the original back in, even after the helper restarts.
+- 💬 **Claude chat window:** its own panel you can float or dock. Saved chats you can switch, rename and delete, with replies rendered as clean Markdown. Each message tells Claude the open sequence, the playhead and the selected clips, so "extend this clip" just works.
 - ⚡ **No approval prompts:** the chat edits the timeline, runs Tesseract and FFmpeg, and uses the shell without stopping to ask. It's told to duplicate the sequence before big changes.
 - 🎞️ **Tesseract and FFmpeg tools:** dedicated tools for motion graphics and for retiming, trimming or converting clips. Work happens in job folders on C: (Tesseract can't save projects on exFAT drives), footage is only read, and finished files are copied out without overwriting anything.
 - 🎨 **Scrubless look:** the same Material 3 Expressive style as Scrubless, the footage finder: dark, lavender accent, rounded cards and pill buttons, with a matching logo.
 - 📋 **Client guides:** pick a client to see its fonts, on-screen text rules and must-dos, read straight from the team knowledge base.
-- 🔍 **Review:** QA checks (gaps on V1/A1, offline media, leftover cut markers), the client's must-dos as a tick list, and a handoff note to paste into ClickUp or Slack. Nothing is ever posted for you.
+- 🔍 **Review:** QA checks (gaps on V1/A1, offline media, leftover cut markers, and the sequence size and frame rate against the client's export spec), the client's must-dos as a tick list, and a handoff note to paste into ClickUp or Slack. Nothing is ever posted for you.
 - 📊 **Plan usage at a glance:** a "Claude NN%" chip with the 5-hour and weekly limits, plus a warning before you send past 85%.
 
 ---
@@ -45,7 +45,7 @@
 3. **Panels:** in Premiere, **Window → UXP Plugins → Editing Assistant** and **Editing Assistant Chat**.
 4. Keep the CEP panel **MCP for Adobe Premiere Pro** open; auto-cut, QA and the chat's Premiere tools go through it.
 
-The **Setup** section checks for Claude Code, Tesseract, whisper.cpp and FFmpeg and says what's missing (with the folder it searched). `npm run check` in `helper/` prints the same checklist.
+The **Setup** section checks for Claude Code, Tesseract, whisper.cpp and FFmpeg and says what's missing (with the folder it searched). `npm run check` in `helper/` prints the same checklist, and `npm test` runs the logic tests (speed mapping, export spec, tool guards).
 
 **Where things are saved:** `%LOCALAPPDATA%\EditingAssistant\`: `chats.json` (your chats), `usage.json` (last plan usage), `cache\` (audio and transcripts for auto-cut) and `tesseract\` (chat job folders). The helper's own log is `helper/helper.log`.
 
@@ -79,5 +79,7 @@ tools/    preview-server.js: serves panel/ at http://127.0.0.1:7791 to check the
 - [x] Chat window with saved chats, Markdown replies and Scrubless styling
 - [x] Locked-down Tesseract and FFmpeg tools for the chat
 - [x] Prompt-free chat, faster streaming and the Editing Assistant logo
+- [x] Undo cuts survives restarts; the chat knows the open sequence and selection
+- [x] QA checks the client's export spec; auto-cut on any audio track and sped-up clips
 - [ ] One-click installer
 - [ ] macOS support

@@ -15,21 +15,22 @@ export const DEFAULT_SETTINGS = {
 
 const norm = (t) => t.toLowerCase().replace(/[^a-z0-9']/g, '');
 
-// clips: [{ start, end, inPoint, mediaPath }] from A1, timeline seconds. sources: Map(mediaPath -> {db, words}).
+// clips: [{ start, end, inPoint, mediaPath, speed }] from the dialogue track, timeline seconds.
+// sources: Map(mediaPath -> {db, words}). A clip at speed 2 plays 2s of source per 1s of timeline.
 export function buildTimeline(clips, sources, duration) {
   const frames = new Float32Array(Math.ceil(duration / FRAME_S)).fill(-90);
   const words = [];
   for (const c of clips) {
     const src = sources.get(c.mediaPath);
     if (!src) continue;
+    const speed = c.speed || 1;
     const f0 = Math.round(c.start / FRAME_S), f1 = Math.round(c.end / FRAME_S);
-    const offset = Math.round(c.inPoint / FRAME_S) - f0;
     for (let f = f0; f < f1 && f < frames.length; f++) {
-      const sf = f + offset;
+      const sf = Math.round((c.inPoint + (f * FRAME_S - c.start) * speed) / FRAME_S);
       if (sf >= 0 && sf < src.db.length) frames[f] = src.db[sf];
     }
-    const srcIn = c.inPoint, srcOut = c.inPoint + (c.end - c.start);
-    for (const w of src.words) if (w.t >= srcIn && w.t < srcOut) words.push({ text: w.text, t: c.start + (w.t - srcIn) });
+    const srcIn = c.inPoint, srcOut = c.inPoint + (c.end - c.start) * speed;
+    for (const w of src.words) if (w.t >= srcIn && w.t < srcOut) words.push({ text: w.text, t: c.start + (w.t - srcIn) / speed });
   }
   words.sort((a, b) => a.t - b.t);
   return { frames, words };

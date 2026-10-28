@@ -52,6 +52,33 @@ export function clientChecklist(markdown) {
   return items.map((t) => t.replace(/\*\*/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim());
 }
 
+// The guide's "**Exports:** 9x16 and 4x5, 30fps, ..." line -> { ratios: [[9,16],[4,5]], fps: 30, text }.
+export function exportSpec(markdown) {
+  const line = (markdown.match(/\*\*exports?:?\*\*:?\s*(.+)/i) || [])[1];
+  if (!line) return null;
+  const ratios = [...line.matchAll(/\b(\d{1,2})\s*[x×:]\s*(\d{1,2})\b/g)].map((m) => [Number(m[1]), Number(m[2])])
+    .filter(([a, b], i, all) => all.findIndex(([c, d]) => c === a && d === b) === i); // the file-name pattern repeats one
+  const fps = Number((line.match(/(\d+(?:\.\d+)?)\s*fps/i) || [])[1]) || null;
+  if (!ratios.length && !fps) return null;
+  return { ratios, fps, text: line.replace(/[`*]/g, '').trim() };
+}
+
+// resolution "1920x1080"; frameSeconds = one frame's length (1/30 for 30fps).
+export function compareSpec(spec, resolution, frameSeconds) {
+  const issues = [];
+  const [w, h] = String(resolution || '').split(/[x×]/).map(Number);
+  const shape = w && h ? `${w}x${h}` : 'unknown size';
+  if (spec.ratios.length && w && h && !spec.ratios.some(([a, b]) => Math.abs(w / h - a / b) < 0.01)) {
+    issues.push(`the sequence is ${shape}, but exports are ${spec.ratios.map(([a, b]) => `${a}x${b}`).join(' / ')}`);
+  }
+  const fps = frameSeconds ? Math.round((1 / frameSeconds) * 100) / 100 : null;
+  // Strict: 29.97 is not 30.
+  if (spec.fps && fps && Math.abs(fps - spec.fps) > 0.005) issues.push(`the sequence runs at ${fps}fps, but exports are ${spec.fps}fps`);
+  return issues.length
+    ? { state: 'warn', detail: `${issues.join('; ')}. Guide: ${spec.text}` }
+    : { state: 'ok', detail: `${shape}${fps ? ` at ${fps}fps` : ''} fits: ${spec.text}` };
+}
+
 export async function runQa(config, clientId) {
   const state = await call('get_premiere_state');
   const active = state.activeSequence;
@@ -85,6 +112,13 @@ export async function runQa(config, clientId) {
   if (clientId) {
     client = getClient(config, clientId);
     checklist = clientChecklist(client.markdown);
+    const spec = exportSpec(client.markdown);
+    if (spec) {
+      checks.push(await check(`Matches ${client.name}'s export spec`, async () => {
+        const t = await call('get_timeline_summary');
+        return compareSpec(spec, t.resolution, t.frameRate && t.frameRate.seconds);
+      }));
+    }
   }
   return { sequence: { id: seq.id, name: seq.name, duration: seq.duration }, checks, client: client && { id: client.id, name: client.name }, checklist, checkedAt: new Date().toISOString() };
 }

@@ -624,6 +624,11 @@ function handleMessage(msg) {
     case 'hello':
       jobBusy = !!msg.jobBusy;
       setBusyChat(msg.busyChatId);
+      // The helper remembers the last auto-cut across restarts, so it can still be undone.
+      if (msg.undo && hasClass($('ac-results'), 'hidden')) {
+        showAcNotice(`The last auto-cut on "${msg.undo.of}" can still be undone (backup: "${msg.undo.backup}").`);
+        show($('ac-after'), true);
+      }
       break;
     case 'chats':
       chatsList = msg.chats || [];
@@ -696,6 +701,7 @@ function acSettings() {
   const thr = getValue('ac-threshold').trim();
   return {
     pauseSeconds: Number(getValue('ac-pause')) || 0.5,
+    track: Number($('ac-track').value) || 0,
     thresholdDb: thr === '' ? 'auto' : Number(thr),
     removeRetakes: isOn('ac-retakes'),
     removeUms: isOn('ac-ums'),
