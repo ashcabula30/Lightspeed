@@ -23,10 +23,13 @@ const config = loadConfig();
 const wss = new WebSocketServer({ host: '127.0.0.1', port: PORT, path: '/panel' });
 
 function send(ws, msg) {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+  if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
 }
 function broadcast(msg) {
-  for (const ws of wss.clients) send(ws, msg);
+  const json = typeof msg === 'string' ? msg : JSON.stringify(msg);
+  for (const ws of wss.clients) {
+    if (ws.readyState === ws.OPEN) ws.send(json);
+  }
 }
 
 // Saved chats shared by every open panel; each keeps its own Claude Code conversation.
@@ -193,9 +196,9 @@ wss.on('connection', (ws) => {
           return await runJob('auto-cut', 'autocut', async () => {
             if (!session.analysis) throw new Error('Run Analyze first.');
             const analysis = session.analysis;
-            session.analysis = null; // a plan is only ever applied once
             jobAbort = new AbortController();
             const result = await applyCuts(analysis, progress('autocut'), jobAbort.signal);
+            session.analysis = null; // a plan is only ever applied once
             session.applied = { ...result, sequence: analysis.sequence };
             if (result.backup) session.backup = { ...result.backup, of: analysis.sequence };
             saveSession();

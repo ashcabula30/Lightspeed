@@ -54,7 +54,10 @@ function loudnessFrames(wav) {
   if (dataStart >= 0) dataStart += 8;
   else dataStart = 44; // fallback standard 44-byte WAV header
   const totalSamples = Math.max(0, Math.floor((buf.length - dataStart) / 2));
-  const samples = new Int16Array(buf.buffer, buf.byteOffset + dataStart, totalSamples);
+  const byteOffset = buf.byteOffset + dataStart;
+  const samples = (byteOffset % 2 === 0)
+    ? new Int16Array(buf.buffer, byteOffset, totalSamples)
+    : new Int16Array(buf.buffer.slice(byteOffset, byteOffset + totalSamples * 2));
   const win = Math.round(16000 * FRAME_S);
   const totalFrames = Math.floor(totalSamples / win);
   const db = new Float32Array(totalFrames);
@@ -62,8 +65,14 @@ function loudnessFrames(wav) {
   for (let f = 0; f < totalFrames; f++) {
     let s = 0;
     const base = f * win;
-    for (let j = 0; j < win; j++) {
-      const v = samples[base + j];
+    const end = base + win;
+    let j = base;
+    for (; j <= end - 4; j += 4) {
+      const v0 = samples[j], v1 = samples[j + 1], v2 = samples[j + 2], v3 = samples[j + 3];
+      s += v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
+    }
+    for (; j < end; j++) {
+      const v = samples[j];
       s += v * v;
     }
     db[f] = 10 * Math.log10(s * factor + 1e-12);

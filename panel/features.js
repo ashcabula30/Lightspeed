@@ -10,6 +10,7 @@ let clientName = '';
 function renderGuide(markdown) {
   const box = $('client-guide');
   box.innerHTML = '';
+  const frag = document.createDocumentFragment();
   for (const raw of markdown.split(/\r?\n/)) {
     const line = raw.replace(/\s+$/, '');
     if (!line.trim() || /^#\s/.test(line)) continue; // the title is already in the picker
@@ -38,8 +39,9 @@ function renderGuide(markdown) {
       el.className = /^\*[^*]/.test(line) ? 'md-p md-note' : 'md-p';
       el.appendChild(inlineNodes(line));
     }
-    box.appendChild(el);
+    frag.appendChild(el);
   }
+  box.appendChild(frag);
   show(box, true);
   show($('client-empty'), false);
 }
@@ -118,6 +120,7 @@ function renderQa(r) {
   items.innerHTML = '';
   show(clientBox, !!(r.client && r.checklist.length));
   if (r.client) $('qa-client-title').textContent = `${r.client.name} must-dos`;
+  const frag = document.createDocumentFragment();
   for (const text of r.checklist) {
     const row = document.createElement('div');
     row.className = 'tick-row';
@@ -135,8 +138,9 @@ function renderQa(r) {
       box.textContent = on ? '✓' : '';
       setClass(label, 'tick-text-done', on);
     });
-    items.appendChild(row);
+    frag.appendChild(row);
   }
+  items.appendChild(frag);
 }
 
 async function copyText(text) {

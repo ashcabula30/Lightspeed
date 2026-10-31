@@ -42,6 +42,8 @@ test('Tesseract and ffmpeg can only write inside the job folder', () => {
   assert.throws(() => checkFfmpegArgs(['-i', 'missing.mp4', 'out.mp4'], dir));
 });
 
+import { keepMarked } from '../src/autocut/markers.js';
+
 test('autoThreshold calculates 20th percentile + 10dB within [-60, -35] dB', () => {
   // All silent frames
   assert.equal(autoThreshold(new Float32Array(100).fill(-90)), -50);
@@ -63,4 +65,32 @@ test('planCuts detects pauses, slates, and respects framerate snaps', () => {
   assert.equal(plan.cuts.length, 1);
   assert.equal(plan.cuts[0].why, 'pause');
   assert(plan.cuts[0].start > 1.0 && plan.cuts[0].end < 3.5);
+});
+
+test('keepMarked filters cuts using binary search tolerance', () => {
+  const cuts = [{ start: 2.0, end: 3.0 }, { start: 5.0, end: 6.0 }, { start: 8.0, end: 9.0 }];
+  const markers = [{ t: 2.01 }, { t: 8.02 }]; // marker at 5.0 was removed by editor
+  const kept = keepMarked(cuts, markers, 30);
+  assert.equal(kept.length, 2);
+  assert.deepEqual(kept.map((c) => c.start), [2.0, 8.0]);
+});
+
+test('buildTimeline handles negative clip start without crashing or corrupting frames', () => {
+  const { frames } = buildTimeline([{ start: -2, end: 4, inPoint: 0, mediaPath: 'a.mp4', speed: 1 }], sources, 10);
+  assert.equal(frames.length, Math.ceil(10 / FRAME_S));
+});
+
+test('planCuts detects single word retake directly preceding slate phrase', () => {
+  const frames = new Float32Array(Math.round(6 / FRAME_S)).fill(-20);
+  const words = [
+    { text: 'Start', t: 0.5 },
+    { text: 'take', t: 1.5 },
+    { text: 'again', t: 1.8 },
+    { text: 'Start', t: 2.5 },
+    { text: 'fresh', t: 3.0 },
+  ];
+  const plan = planCuts({ frames, words }, { pauseSeconds: 0.5, slatePhrases: ['take again'] }, 30, 6);
+  assert.equal(plan.retakes.length, 1);
+  assert.equal(plan.retakes[0].confident, true);
+  assert.equal(plan.retakes[0].removedText, 'Start take again');
 });

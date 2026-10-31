@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS = {
   slatePhrases: ['take again'],
 };
 
-const norm = (t) => t.toLowerCase().replace(/[^a-z0-9']/g, '');
+const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9']/g, '');
 
 // clips: [{ start, end, inPoint, mediaPath, speed }] from the dialogue track, timeline seconds.
 // sources: Map(mediaPath -> {db, words}). A clip at speed 2 plays 2s of source per 1s of timeline.
@@ -24,7 +24,7 @@ export function buildTimeline(clips, sources, duration) {
     const src = sources.get(c.mediaPath);
     if (!src) continue;
     const speed = c.speed || 1;
-    const f0 = Math.round(c.start / FRAME_S), f1 = Math.round(c.end / FRAME_S);
+    const f0 = Math.max(0, Math.round(c.start / FRAME_S)), f1 = Math.round(c.end / FRAME_S);
     for (let f = f0; f < f1 && f < frames.length; f++) {
       const sf = Math.round((c.inPoint + (f * FRAME_S - c.start) * speed) / FRAME_S);
       if (sf >= 0 && sf < src.db.length) frames[f] = src.db[sf];
@@ -51,16 +51,30 @@ export function buildTimeline(clips, sources, duration) {
 }
 
 // Threshold between room tone and speech: 10 dB above the quietest fifth, kept in a sane range.
-// TypedArray sorting avoids boxing hundreds of thousands of floats into JavaScript array objects.
+// Single-pass histogram bucketing over [-89, +11] dB avoids allocating and sorting large arrays.
 export function autoThreshold(frames) {
+  const BINS = 1000;
+  const hist = new Int32Array(BINS);
   let count = 0;
-  for (let i = 0; i < frames.length; i++) if (frames[i] > -89) count++;
+  for (let i = 0; i < frames.length; i++) {
+    const v = frames[i];
+    if (v > -89) {
+      const bin = Math.min(BINS - 1, Math.max(0, Math.floor((v + 89) * 10)));
+      hist[bin]++;
+      count++;
+    }
+  }
   if (!count) return -50;
-  const filtered = new Float32Array(count);
-  let idx = 0;
-  for (let i = 0; i < frames.length; i++) if (frames[i] > -89) filtered[idx++] = frames[i];
-  filtered.sort();
-  const p20 = filtered[Math.floor(count * 0.2)];
+  const target = Math.floor(count * 0.2);
+  let accumulated = 0;
+  let p20 = -50;
+  for (let b = 0; b < BINS; b++) {
+    accumulated += hist[b];
+    if (accumulated >= target) {
+      p20 = (b / 10) - 89;
+      break;
+    }
+  }
   return Math.max(-60, Math.min(-35, Math.round(p20 + 10)));
 }
 
@@ -95,6 +109,8 @@ function attachWords(words, snd) {
     const { best, bd } = nearest(w.t);
     if (best && bd <= 0.8) {
       best.w.push(i);
+      best.s = Math.min(best.s, Math.max(0, w.t - 0.1));
+      best.e = Math.max(best.e, w.t + 0.3);
     } else {
       // quiet word below the threshold: protect a small window around it.
       // Binary search insertion keeps snd sorted in O(log N) instead of full O(N log N) re-sort.
@@ -122,13 +138,13 @@ function findRetakes(words, slatePhrases) {
       const t0 = norm(words[r].text), t1 = words[r + 1] ? norm(words[r + 1].text) : null;
       let bad = -1;
       for (let i = k - 1; i >= 0 && words[i].t >= words[k].t - 40; i--) {
-        if (norm(words[i].text) === t0 && (!t1 || (words[i + 1] && norm(words[i + 1].text) === t1))) { bad = i; break; }
+        if (norm(words[i].text) === t0 && (!t1 || i + 1 === k || (words[i + 1] && norm(words[i + 1].text) === t1))) { bad = i; break; }
       }
       let confident = true;
       if (bad < 0) { // no matching restart: drop back to the start of the sentence
         confident = false;
         bad = k;
-        while (bad > 0 && !/[.?!]$/.test(words[bad - 1].text)) bad--;
+        while (bad > 0 && !/[.?!]["']?$/.test(words[bad - 1].text)) bad--;
       }
       for (let i = bad; i < r; i++) removed[i] = true;
       retakes.push({ at: words[bad].t, removedText: words.slice(bad, r).map((w) => w.text).join(' '),
@@ -149,14 +165,17 @@ function findRepeats(words, removed) {
     cur.push(w);
     if (/[.?!]["']?$/.test(w.text)) { sentences.push(cur); cur = []; }
   });
-  const normSentences = sentences.map((s) => s.map((w) => norm(w.text)).join(' '));
+  if (cur.length) sentences.push(cur);
+  const normSentences = sentences.map((s) => s.map((w) => norm(w.text)).filter(Boolean).join(' '));
   const out = [];
   const strip = (x) => x.replace(/^(and|so|but) /, '');
+  const stripped = normSentences.map(strip);
   for (let i = 1; i < sentences.length; i++) {
-    const a = normSentences[i - 1], b = normSentences[i];
-    const shorter = strip(a.length < b.length ? a : b), longer = strip(a.length < b.length ? b : a);
+    const a = stripped[i - 1], b = stripped[i];
+    if (!a || !b) continue;
+    const shorter = a.length < b.length ? a : b, longer = a.length < b.length ? b : a;
     // A redo repeats either the start of the previous sentence or its ending.
-    if (shorter.split(' ').length >= 3 && (longer.startsWith(shorter) || longer.endsWith(shorter))) {
+    if (shorter.split(/\s+/).length >= 3 && (longer.startsWith(shorter) || longer.endsWith(shorter))) {
       out.push({ at: sentences[i - 1][0].t, text: sentences[i].map((w) => w.text).join(' ') });
     }
   }
@@ -201,8 +220,8 @@ export function planCuts({ frames, words }, settings, fps, duration) {
     if (b.s === duration) { R = 0; L = keep; }
     if (junk.length) {
       const js = junk[0].s, je = junk[junk.length - 1].e;
-      L = Math.min(L, Math.max(0.04, js - a.e));
-      R = Math.min(R, Math.max(0.04, b.s - je));
+      L = Math.min(L, Math.max(0, js - a.e));
+      R = Math.min(R, Math.max(0, b.s - je));
     }
     const start = snapUp(a.e + L), end = snapDn(b.s - R);
     if (end - start < 2 / fps) continue;

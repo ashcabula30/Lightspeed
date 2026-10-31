@@ -9,10 +9,13 @@ const BATCH = 200;
 // list_markers' shape isn't documented; accept the field names it is likely to use.
 function readMarkers(data) {
   const list = Array.isArray(data) ? data : (data && (data.markers || data.items)) || [];
-  return list.map((m) => ({
-    name: String(m.name || ''),
-    t: Number(m.start ?? m.startSeconds ?? m.start_seconds ?? m.time ?? m.timeSeconds ?? (m.start && m.start.seconds)),
-  })).filter((m) => Number.isFinite(m.t));
+  return list.map((m) => {
+    const rawStart = typeof m.start === 'object' && m.start !== null ? m.start.seconds : m.start;
+    return {
+      name: String(m.name || ''),
+      t: Number(rawStart ?? m.startSeconds ?? m.start_seconds ?? m.time ?? m.timeSeconds),
+    };
+  }).filter((m) => Number.isFinite(m.t));
 }
 
 export async function listCutMarkers(sequenceId) {
@@ -48,5 +51,17 @@ export async function placeCutMarkers(analysis, onProgress = () => {}, signal) {
 // Cuts whose preview marker is still on the timeline (within 1.5 frames of the cut start).
 export function keepMarked(cuts, markers, fps) {
   const tol = 1.5 / fps;
-  return cuts.filter((c) => markers.some((m) => Math.abs(m.t - c.start) <= tol));
+  if (!markers.length || !cuts.length) return [];
+  const sorted = markers.map((m) => m.t).sort((a, b) => a - b);
+  return cuts.filter((c) => {
+    let low = 0, high = sorted.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const mt = sorted[mid];
+      if (Math.abs(mt - c.start) <= tol) return true;
+      if (mt < c.start) low = mid + 1;
+      else high = mid - 1;
+    }
+    return false;
+  });
 }

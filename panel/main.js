@@ -735,6 +735,7 @@ function listBlock(title, rows, note) {
     n.textContent = note;
     wrap.appendChild(n);
   }
+  const frag = document.createDocumentFragment();
   for (const [time, text] of rows) {
     const row = document.createElement('div');
     row.className = 'list-row list-row-link';
@@ -747,8 +748,9 @@ function listBlock(title, rows, note) {
     row.appendChild(t);
     row.appendChild(x);
     row.addEventListener('click', () => { if (online && !jobBusy) seekTo(time); });
-    wrap.appendChild(row);
+    frag.appendChild(row);
   }
+  wrap.appendChild(frag);
   return wrap;
 }
 

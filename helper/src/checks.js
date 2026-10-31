@@ -38,7 +38,9 @@ export function findWhisper() {
     if (!exists(root)) continue;
     const direct = path.join(root, isWin ? 'whisper-cli.exe' : 'whisper-cli');
     if (exists(direct)) return direct;
-    for (const build of fs.readdirSync(root)) {
+    let builds = [];
+    try { builds = fs.readdirSync(root); } catch { continue; }
+    for (const build of builds) {
       const candidate = path.join(root, build, isWin ? 'Release' : '', isWin ? 'whisper-cli.exe' : 'whisper-cli');
       if (exists(candidate)) return candidate;
     }
@@ -64,7 +66,11 @@ function findTesseract() {
   const candidates = [];
   if (isWin) {
     const pub = path.join(localAppData, 'Tesseract', 'public-cli');
-    if (exists(pub)) for (const d of fs.readdirSync(pub)) candidates.push(path.join(pub, d, 'bin', 'tsrct.exe'));
+    if (exists(pub)) {
+      try {
+        for (const d of fs.readdirSync(pub)) candidates.push(path.join(pub, d, 'bin', 'tsrct.exe'));
+      } catch { /* ignore unreadable dir */ }
+    }
   } else {
     candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'Tesseract', 'bin', 'tsrct'));
     candidates.push(path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'Tesseract', 'bin', 'tsrct'));

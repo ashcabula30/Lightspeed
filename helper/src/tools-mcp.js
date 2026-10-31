@@ -26,7 +26,7 @@ const ALLOWED = new Set(['project', 'preview', 'filmstrip', 'export', 'help']);
 const WRITE_FLAGS = new Set(['-p', '--project', '-o', '--output']);
 // Tesseract flags whose value is only read: these must be existing files.
 const READ_FLAGS = new Set(['--file', '--actions']);
-const MEDIA = new Set(['.mp4', '.mov', '.png', '.jpg', '.jpeg', '.wav', '.mp3', '.m4a', '.aac', '.mxf', '.gif', '.webm']);
+const MEDIA = new Set(['.mp4', '.mov', '.png', '.jpg', '.jpeg', '.wav', '.mp3', '.m4a', '.aac', '.mxf', '.gif', '.webm', '.mkv', '.webp', '.bmp', '.flac', '.ogg', '.m4v']);
 const TEXT = new Set(['.json', '.txt', '.md']);
 
 function run(cmd, args, cwd, timeoutMs) {
@@ -199,16 +199,19 @@ const LOCAL = {
 
 // ---------- the helper connection (for Premiere tools) ----------
 let socket = null;
+let connectingSocket = null;
 let nextId = 1;
 const waiting = new Map();
 
 function helper() {
   if (socket && socket.readyState === WebSocket.OPEN) return Promise.resolve(socket);
-  return new Promise((resolve, reject) => {
+  if (connectingSocket) return connectingSocket;
+  connectingSocket = new Promise((resolve, reject) => {
     const ws = new WebSocket(HELPER_URL);
-    ws.on('open', () => { socket = ws; resolve(ws); });
-    ws.on('error', (err) => reject(new Error(`The Editing Assistant helper isn't reachable (${err.message}).`)));
+    ws.on('open', () => { socket = ws; connectingSocket = null; resolve(ws); });
+    ws.on('error', (err) => { connectingSocket = null; reject(new Error(`The Editing Assistant helper isn't reachable (${err.message}).`)); });
     ws.on('close', () => {
+      connectingSocket = null;
       if (socket === ws) socket = null;
       for (const [, w] of waiting) w.reject(new Error('Lost the connection to the Editing Assistant helper.'));
       waiting.clear();
@@ -224,6 +227,7 @@ function helper() {
       }
     });
   });
+  return connectingSocket;
 }
 
 async function ask(type, extra) {

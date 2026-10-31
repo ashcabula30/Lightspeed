@@ -4,7 +4,7 @@ import { call } from './premiere.js';
 import { listCutMarkers } from './autocut/markers.js';
 import { getClient } from './clients.js';
 
-const num = (...vals) => vals.map(Number).find((v) => Number.isFinite(v));
+const num = (...vals) => vals.map((v) => (v != null ? Number(v) : NaN)).find(Number.isFinite);
 
 // get_timeline_gaps / check_offline_media shapes aren't documented; read the likely field names.
 function gapsFrom(data) {

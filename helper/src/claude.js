@@ -162,6 +162,7 @@ export class ClaudeChat {
     // Tesseract exports and Premiere jobs can be long: give tool calls up to 30 minutes.
     const env = { ...process.env, MCP_TOOL_TIMEOUT: String(30 * 60 * 1000) };
     const proc = spawn(exe, args, { cwd: this.workdir, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    proc.stdin.on('error', () => {}); // ignore EPIPE if Claude exits before/during write; handled on close
     this.proc = proc;
     this.procSession = this.sessionId;
     this.procFor = this.sessionId; // what it was started for (null = a new chat), until its first reply

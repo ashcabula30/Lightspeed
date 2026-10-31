@@ -11,8 +11,8 @@ const port = Number(process.env.PREVIEW_PORT || 7791);
 
 http.createServer((req, res) => {
   const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
-  const file = path.join(root, rel);
-  if (!file.startsWith(root) || !fs.existsSync(file)) { res.writeHead(404); return res.end('Not found'); }
+  const file = path.resolve(root, rel);
+  if ((!file.startsWith(root + path.sep) && file !== root) || !fs.existsSync(file)) { res.writeHead(404); return res.end('Not found'); }
   res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
   fs.createReadStream(file).pipe(res);
 }).listen(port, '127.0.0.1', () => console.log(`Panel preview on http://127.0.0.1:${port}`));

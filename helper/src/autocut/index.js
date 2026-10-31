@@ -28,7 +28,7 @@ export async function readSequenceAudio(sequenceId, onStep = () => {}, signal, t
   const name = `A${trackIndex + 1}`;
   const { info, clips } = await audioClips(seqId, trackIndex);
   if (!clips.length) throw new Error(`Track ${name} has no clips to analyse. Pick the track the dialogue is on.`);
-  const reversed = clips.find((c) => !(c.speed > 0));
+  const reversed = clips.find((c) => (c.speed ?? 1) <= 0);
   if (reversed) throw new Error(`A clip on ${name} plays in reverse. Auto-cut can't follow reversed clips.`);
   const fps = Math.round(1 / info.frameRate.seconds);
 
