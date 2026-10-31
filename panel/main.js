@@ -410,6 +410,7 @@ function flushReply() {
   renderTarget = null;
 }
 function setReplyText(body, text) {
+  if (body.mdRaw === text) return;
   body.mdRaw = text;
   if (renderTarget && renderTarget !== body) flushReply();
   renderTarget = body;

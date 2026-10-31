@@ -42,23 +42,31 @@ function cacheKey(mediaPath) {
 async function extractWav(mediaPath, key, signal) {
   const wav = path.join(CACHE_DIR, `${key}.wav`);
   if (!fs.existsSync(wav)) {
-    await run('ffmpeg', ['-v', 'error', '-y', '-i', mediaPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], 30 * 60 * 1000, signal);
+    await run('ffmpeg', ['-hide_banner', '-nostdin', '-v', 'error', '-y', '-threads', '0', '-i', mediaPath, '-vn', '-sn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], 30 * 60 * 1000, signal);
   }
   return wav;
 }
 
-// RMS in dBFS per 20 ms frame.
+// RMS in dBFS per 20 ms frame. Direct typed array view avoids millions of Buffer method calls.
 function loudnessFrames(wav) {
   const buf = fs.readFileSync(wav);
-  const dataStart = buf.indexOf('data') + 8;
-  const n = Math.floor((buf.length - dataStart) / 2);
+  let dataStart = buf.indexOf('data');
+  if (dataStart >= 0) dataStart += 8;
+  else dataStart = 44; // fallback standard 44-byte WAV header
+  const totalSamples = Math.max(0, Math.floor((buf.length - dataStart) / 2));
+  const samples = new Int16Array(buf.buffer, buf.byteOffset + dataStart, totalSamples);
   const win = Math.round(16000 * FRAME_S);
-  const db = new Float32Array(Math.floor(n / win));
-  for (let f = 0; f < db.length; f++) {
+  const totalFrames = Math.floor(totalSamples / win);
+  const db = new Float32Array(totalFrames);
+  const factor = 1 / (32768 * 32768 * win);
+  for (let f = 0; f < totalFrames; f++) {
     let s = 0;
-    const base = dataStart + f * win * 2;
-    for (let j = 0; j < win; j++) { const v = buf.readInt16LE(base + j * 2) / 32768; s += v * v; }
-    db[f] = 10 * Math.log10(s / win + 1e-12);
+    const base = f * win;
+    for (let j = 0; j < win; j++) {
+      const v = samples[base + j];
+      s += v * v;
+    }
+    db[f] = 10 * Math.log10(s * factor + 1e-12);
   }
   return db;
 }
@@ -82,7 +90,9 @@ async function transcribe(wav, key, signal) {
       else words[words.length - 1].text += t.text; // subword or punctuation joins the previous word
     }
   }
-  fs.writeFileSync(out, JSON.stringify(words));
+  const tmpOut = `${out}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpOut, JSON.stringify(words));
+  fs.renameSync(tmpOut, out);
   fs.rmSync(`${base}.json`, { force: true });
   return words;
 }

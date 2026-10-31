@@ -33,7 +33,9 @@ export class Chats {
   save() {
     try {
       fs.mkdirSync(path.dirname(FILE), { recursive: true });
-      fs.writeFileSync(FILE, JSON.stringify(this.chats));
+      const tmp = `${FILE}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.chats));
+      fs.renameSync(tmp, FILE);
     } catch (err) { console.error('[helper] could not save chats:', err.message); }
   }
 

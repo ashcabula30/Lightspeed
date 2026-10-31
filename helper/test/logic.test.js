@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { buildTimeline } from '../src/autocut/plan.js';
+import { autoThreshold, buildTimeline, planCuts } from '../src/autocut/plan.js';
 import { FRAME_S } from '../src/autocut/media.js';
 import { compareSpec, exportSpec } from '../src/qa.js';
 import { checkFfmpegArgs, checkTesseractArgs, WORK_DIR } from '../src/tools-mcp.js';
@@ -40,4 +40,27 @@ test('Tesseract and ffmpeg can only write inside the job folder', () => {
   assert.throws(() => checkTesseractArgs(['export', '-p', 'a.tsrct', '--output=../../x.mp4'], dir));
   assert.throws(() => checkTesseractArgs(['telemetry', 'enable'], dir));
   assert.throws(() => checkFfmpegArgs(['-i', 'missing.mp4', 'out.mp4'], dir));
+});
+
+test('autoThreshold calculates 20th percentile + 10dB within [-60, -35] dB', () => {
+  // All silent frames
+  assert.equal(autoThreshold(new Float32Array(100).fill(-90)), -50);
+  // Quiet room tone frames at -65 dBFS
+  const quiet = new Float32Array(100).fill(-65);
+  assert.equal(autoThreshold(quiet), -55); // -65 + 10 = -55
+  // Very loud background
+  const loud = new Float32Array(100).fill(-20);
+  assert.equal(autoThreshold(loud), -35); // clamped to -35
+});
+
+test('planCuts detects pauses, slates, and respects framerate snaps', () => {
+  // 5 seconds of audio: 0-1s speech (-20dB), 1-3.5s pause (-70dB), 3.5-5s speech (-20dB)
+  const frames = new Float32Array(Math.round(5 / FRAME_S)).fill(-70);
+  for (let f = 0; f < Math.round(1 / FRAME_S); f++) frames[f] = -20;
+  for (let f = Math.round(3.5 / FRAME_S); f < frames.length; f++) frames[f] = -20;
+  const words = [{ text: 'start', t: 0.5 }, { text: 'end', t: 4.0 }];
+  const plan = planCuts({ frames, words }, { pauseSeconds: 0.5, thresholdDb: -45 }, 30, 5);
+  assert.equal(plan.cuts.length, 1);
+  assert.equal(plan.cuts[0].why, 'pause');
+  assert(plan.cuts[0].start > 1.0 && plan.cuts[0].end < 3.5);
 });

@@ -30,36 +30,61 @@ export function buildTimeline(clips, sources, duration) {
       if (sf >= 0 && sf < src.db.length) frames[f] = src.db[sf];
     }
     const srcIn = c.inPoint, srcOut = c.inPoint + (c.end - c.start) * speed;
-    for (const w of src.words) if (w.t >= srcIn && w.t < srcOut) words.push({ text: w.text, t: c.start + (w.t - srcIn) / speed });
+    const sw = src.words;
+    if (sw && sw.length) {
+      // Binary search for the first word with t >= srcIn
+      let low = 0, high = sw.length;
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        if (sw[mid].t < srcIn) low = mid + 1;
+        else high = mid;
+      }
+      for (let i = low; i < sw.length; i++) {
+        const w = sw[i];
+        if (w.t >= srcOut) break;
+        words.push({ text: w.text, t: c.start + (w.t - srcIn) / speed });
+      }
+    }
   }
   words.sort((a, b) => a.t - b.t);
   return { frames, words };
 }
 
 // Threshold between room tone and speech: 10 dB above the quietest fifth, kept in a sane range.
+// TypedArray sorting avoids boxing hundreds of thousands of floats into JavaScript array objects.
 export function autoThreshold(frames) {
-  const real = Array.from(frames).filter((v) => v > -89).sort((a, b) => a - b);
-  if (!real.length) return -50;
-  const p20 = real[Math.floor(real.length * 0.2)];
+  let count = 0;
+  for (let i = 0; i < frames.length; i++) if (frames[i] > -89) count++;
+  if (!count) return -50;
+  const filtered = new Float32Array(count);
+  let idx = 0;
+  for (let i = 0; i < frames.length; i++) if (frames[i] > -89) filtered[idx++] = frames[i];
+  filtered.sort();
+  const p20 = filtered[Math.floor(count * 0.2)];
   return Math.max(-60, Math.min(-35, Math.round(p20 + 10)));
 }
 
 function soundIntervals(frames, threshold) {
-  let snd = [], cur = null;
-  frames.forEach((v, i) => {
+  const snd = [];
+  let cur = null;
+  for (let i = 0; i < frames.length; i++) {
+    const v = frames[i];
     const t = i * FRAME_S;
     if (v > threshold) {
       if (cur && t - cur.e < 0.12) cur.e = t + FRAME_S; // bridge tiny dips inside a word
       else { cur = { s: t, e: t + FRAME_S, w: [] }; snd.push(cur); }
     }
-  });
+  }
   return snd.filter((x) => x.e - x.s >= 0.04);
 }
 
 function attachWords(words, snd) {
+  let ptr = 0;
   const nearest = (t) => {
+    while (ptr < snd.length && snd[ptr].e < t - 0.8) ptr++;
     let best = null, bd = Infinity;
-    for (const x of snd) {
+    for (let i = ptr; i < snd.length; i++) {
+      const x = snd[i];
       const d = t < x.s ? x.s - t : t > x.e ? t - x.e : 0;
       if (d < bd) { bd = d; best = x; }
       if (x.s > t + 1) break;
@@ -68,11 +93,19 @@ function attachWords(words, snd) {
   };
   words.forEach((w, i) => {
     const { best, bd } = nearest(w.t);
-    if (best && bd <= 0.8) best.w.push(i);
-    else { // quiet word below the threshold: protect a small window around it
+    if (best && bd <= 0.8) {
+      best.w.push(i);
+    } else {
+      // quiet word below the threshold: protect a small window around it.
+      // Binary search insertion keeps snd sorted in O(log N) instead of full O(N log N) re-sort.
       const p = { s: Math.max(0, w.t - 0.1), e: w.t + 0.3, w: [i], pseudo: true };
-      snd.push(p);
-      snd.sort((a, b) => a.s - b.s);
+      let low = ptr, high = snd.length;
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        if (snd[mid].s < p.s) low = mid + 1;
+        else high = mid;
+      }
+      snd.splice(low, 0, p);
     }
   });
 }
@@ -116,10 +149,11 @@ function findRepeats(words, removed) {
     cur.push(w);
     if (/[.?!]["']?$/.test(w.text)) { sentences.push(cur); cur = []; }
   });
+  const normSentences = sentences.map((s) => s.map((w) => norm(w.text)).join(' '));
   const out = [];
+  const strip = (x) => x.replace(/^(and|so|but) /, '');
   for (let i = 1; i < sentences.length; i++) {
-    const a = sentences[i - 1].map((w) => norm(w.text)).join(' '), b = sentences[i].map((w) => norm(w.text)).join(' ');
-    const strip = (x) => x.replace(/^(and|so|but) /, '');
+    const a = normSentences[i - 1], b = normSentences[i];
     const shorter = strip(a.length < b.length ? a : b), longer = strip(a.length < b.length ? b : a);
     // A redo repeats either the start of the previous sentence or its ending.
     if (shorter.split(' ').length >= 3 && (longer.startsWith(shorter) || longer.endsWith(shorter))) {
@@ -149,8 +183,17 @@ export function planCuts({ frames, words }, settings, fps, duration) {
     .concat(keptS.length ? [{ a: keptS[keptS.length - 1], b: { s: duration } }] : []);
 
   const cuts = [], longUnworded = [];
+  // Two-pointer advancing scan finds junk intervals inside each gap in O(Gaps + Snd) linear time
+  // instead of scanning all sound intervals for every single gap.
+  let junkPtr = 0;
   for (const { a, b } of gaps) {
-    const junk = snd.filter((x) => x.kind !== 'kept' && x.s >= a.e - 1e-6 && x.e <= b.s + 1e-6);
+    while (junkPtr < snd.length && snd[junkPtr].e < a.e - 1e-6) junkPtr++;
+    const junk = [];
+    for (let j = junkPtr; j < snd.length; j++) {
+      const x = snd[j];
+      if (x.s > b.s + 1e-6) break;
+      if (x.kind !== 'kept' && x.s >= a.e - 1e-6 && x.e <= b.s + 1e-6) junk.push(x);
+    }
     const gap = b.s - a.e;
     if (gap <= keep + 1e-6 && !junk.length) continue;
     let L = keep / 2, R = keep / 2;

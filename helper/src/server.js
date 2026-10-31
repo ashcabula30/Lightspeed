@@ -40,7 +40,9 @@ try { Object.assign(session, JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')));
 function saveSession() {
   try {
     fs.mkdirSync(APP_DATA, { recursive: true });
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({ applied: session.applied, backup: session.backup }));
+    const tmp = `${SESSION_FILE}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ applied: session.applied, backup: session.backup }));
+    fs.renameSync(tmp, SESSION_FILE);
   } catch (err) { console.error('[helper] could not save the auto-cut session:', err.message); }
 }
 
@@ -73,13 +75,16 @@ async function runJob(kind, prefix, job) {
 }
 
 // What the editor is looking at, sent along with each chat message so "this clip" just works.
-// Best effort: skipped while a Premiere job runs, given up on after 1.5 s, and not retried for a
-// minute after a failure, so a closed Premiere doesn't slow every message down.
+// Best effort: skipped while a Premiere job runs, given up on after 1.5 s, and uses progressive backoff
+// (5s -> 15s -> max 30s) after failures so momentary scrubbing doesn't black context out for a whole minute.
 let contextFailedAt = 0;
+let contextCooldownMs = 0;
 async function premiereContext() {
-  if (jobBusy || Date.now() - contextFailedAt < 60000) return '';
+  if (jobBusy || Date.now() - contextFailedAt < contextCooldownMs) return '';
   try {
     const s = await Promise.race([call('get_premiere_state'), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 1500))]);
+    contextFailedAt = 0;
+    contextCooldownMs = 0;
     const seq = s.activeSequence;
     if (!seq) return 'Premiere right now: no sequence is open.';
     const sel = (s.selectedClips || []).map((c) => `"${c.name}" (node ${c.nodeId})`).join(', ');
@@ -87,6 +92,7 @@ async function premiereContext() {
       + (sel ? `selected clips: ${sel}.` : 'no clips selected.');
   } catch {
     contextFailedAt = Date.now();
+    contextCooldownMs = contextCooldownMs ? Math.min(30000, contextCooldownMs * 2) : 5000;
     return '';
   }
 }

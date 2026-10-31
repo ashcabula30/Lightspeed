@@ -6,6 +6,10 @@
 // **bold**, __bold__, `code`, [text](url), *italic*, _italic_
 function inlineNodes(text) {
   const frag = document.createDocumentFragment();
+  if (!/[*_`[]/.test(text)) {
+    frag.appendChild(document.createTextNode(text));
+    return frag;
+  }
   const re = /\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\[([^\]]+)\]\([^)]+\)|\*([^*\s][^*]*)\*|\b_([^_]+)_\b/g;
   let last = 0, m;
   while ((m = re.exec(text))) {
